@@ -1,4 +1,1 @@
-
-*.o
-
-tree_dat/*
+.vscode

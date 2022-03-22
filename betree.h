@@ -449,7 +449,7 @@ public:
 
         data->size += num;
 
-        // check if after adding, the leaf  ` has exceeded limit and
+        // check if after adding, the leaf  has exceeded limit and
         // return accordingly
         return data->size >= knobs::NUM_DATA_PAIRS;
     }
@@ -2083,6 +2083,36 @@ public:
         return true;
     }
 
+    /**
+     * Insert elements from a sorted buffer, this method should only be called by a tree that only 
+     * accepts sorted tuples(in ascending order).
+     * 
+     * @param buf The buf that hold sorted tuples
+     * @param _begin The begin index of the sorted tuples
+     * @param _end The end index of the sorted tuples
+     * @return True is insertion succedded.
+     */
+    template <typename key_type, typename value_type>
+    bool sorted_load(std::pair<key_type, value_type> *buf, uint _begin, uint _end) 
+    {
+        // First we check whether we can insert into the @tail_leaf    
+        if(tail_leaf != nullptr)
+        {
+            tail_leaf->open();
+            if(tail_leaf->getDataSize() < knobs::NUM_DATA_PAIRS-1) 
+            {
+                uint empty_slots = knobs::NUM_DATA_PAIRS - 1 - tail_leaf->getDataSize();
+                uint total_tuples = _end - _begin + 1;
+                if(total_tuples < empty_slots)
+                {
+                    // The tail_leaf is enough for insertion
+                    std::pair<key_type, value_type> *elements_to_insert;
+                    elements_to_insert = new std::pair<key_type, value_type> [total_tuples];
+                    
+                }
+            }
+        }
+    }
 public:
     double findMedian(int *a, int n)
     {
