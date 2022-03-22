@@ -158,17 +158,6 @@ class dual_tree
     
     buffer<_key, _value, _compare> buf();
 
-    
-public:
-    void add_tuple(std::pair<_key, _value> new_tuple)
-    {
-        if(!this->buf.add_tuple(new_tuple))
-        {
-            
-        }
-    }
-
-
 };
 
 #endif

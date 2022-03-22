@@ -2095,21 +2095,37 @@ public:
     template <typename key_type, typename value_type>
     bool sorted_load(std::pair<key_type, value_type> *buf, uint _begin, uint _end) 
     {
-        // First we check whether we can insert into the @tail_leaf    
-        if(tail_leaf != nullptr)
+        // 1. We check whether the tree is empty: check @this->tail_leaf == nullptr
+        // 2. If the tree is empty, we can directly use the bulkload method
+        if(tail_leaf == nullptr)
         {
+            std::vector<std::pair<key_type, value_type>> vec((buf+_begin), (buf+_end+1));
+            this->bulkLoad(vec.begin(), vec.end());
+        } 
+        else
+        {
+            // 3. If the tree is non-empty, we check whether we can insert into the @tail_leaf, and
+            // then bulk load other tuples.
             tail_leaf->open();
             if(tail_leaf->getDataSize() < knobs::NUM_DATA_PAIRS-1) 
             {
                 uint empty_slots = knobs::NUM_DATA_PAIRS - 1 - tail_leaf->getDataSize();
                 uint total_tuples = _end - _begin + 1;
-                if(total_tuples < empty_slots)
+                // The tail_leaf is enough for insertion
+                if(total_tuples <= empty_slots)
                 {
-                    // The tail_leaf is enough for insertion
-                    std::pair<key_type, value_type> *elements_to_insert;
-                    elements_to_insert = new std::pair<key_type, value_type> [total_tuples];
-                    
+                    tail_leaf->insertInLeaf((buf+_begin), total_tuples);
+                    return true;
                 }
+                else
+                {
+                    // new leaf node(s) is required. Before create new nodes, we insert as many as 
+                    // tuples into tail_leaf node
+                    tail_leaf->insertInLeaf((buf+_begin), empty_slots);
+                    _begin += empty_slots;
+                }
+                std::vector<std::pair<key_type, value_type>> vec((buf+_begin), (buf+_end+1));
+                this->bulkLoad(vec.begin(), vec.end());
             }
         }
     }
