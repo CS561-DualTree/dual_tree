@@ -148,37 +148,94 @@ class dual_tree
     BeTree<_key, _value, _knobs, _compare> right_tree("manager", "./right_tree_dat",
         _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
     
+    // For now, do not use the buffer.
     buffer<_key, _value, _dual_tree_knobs, _compare> *buf;
+
+    // indicator of whether to use buffer to temporarily store incoming tuples.
+    bool buffer_mode{ false };
+
+    // The maximum value of the right tree
+    _key right_tree_max;
+
+    // The minimum value of the right tree
+    _key right_tree_min;
+
+    // The number of the tuples in the dual-tree
+    ulong size;
 
 public:
 
-    dual_tree(){buf = new buffer<_key, _value, _dual_tree_knobs, _compare>();}
-    ~dual_tree(){delete buf;}
+    // Default constructor, disable the buffer.
+    dual_tree(){
+        buf=nullptr;
+        size = 0;
+    }
+
+    // Parameterized constructor 1
+    dual_tree(bool enable_buffer): buffer_mode(enable_buffer)
+    {
+        if(buffer_mode)
+            buf = new buffer<_key, _value, _dual_tree_knobs, _compare>();
+        size = 0;
+    }
+
+    // Deconstructor
+    ~dual_tree()
+    {
+        if(buffer_mode)
+            delete buf;
+    }
+
+
     bool insert_tuple(_key key, _value value)
     {
-        if(!buf->add_tuple(std::pair<_key, _value>(key, value)))
+        if(buffer_mode)
         {
-            buf->flush_tuples(this->left_tree, this->right_tree);
+            if(!buf->add_tuple(std::pair<_key, _value>(key, value)))
+            {
+                buf->flush_tuples(this->left_tree, this->right_tree);
+                right_tree_max = right_tree.getMaximumKey();
+                right_tree_min = right_tree.getMinimumKey();
+            }
+            buf->add_tuple(std::pair<_key, _value>(key, value));
         }
+        else
+        {
+            if(size == 0)
+                right_tree.insert_to_tail_leaf(key, value);
+            else 
+            {
+                if(key < right_tree_max)
+                    left_tree.insert(key, value);
+                else
+                    right_tree.insert_to_tail_leaf(key, value);
+            }
+            right_tree_max = right_tree.getMaximumKey();
+            right_tree_min = right_tree.getMinimumKey();
+        }
+        size += 1; 
     }
 
     bool query(_key key)
     {
-        // 1. Search the buffer for the key.
-        for(int i = 0; i < buf->size; i++)
-        {
-            if(buf->getTuple(i).first == key)
-            {
-                return true;
-            }
-        }
+        // 1. If enable buffer: fist search the buffer for the key.
+        if(this->buffer_mode)
+            for(int i = 0; i < buf->size; i++)
+                if(buf->getTuple(i).first == key)
+                    return true;
         // 2. Search both trees for the key.
         return left_tree.query(key) && right_tree.query(key);
     }
 
     std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
     {
-        
+        // 1. TODO: range query when using buffer
+
+        // 2. range query in both tree.
+        std::vector<std::pair<_key, _value>> left_res = left_tree.rangeQuery(low, high);
+        std::vector<std::pair<_key, _value>> right_res = right_tree.rangeQuery(low, high);
+        left_res.insert(left_res.end(), right_res.begin(), right_res.end());
+        return left_res;
     }
 };
 
