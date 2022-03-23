@@ -2092,7 +2092,6 @@ public:
      * @param _end The end index of the sorted tuples
      * @return True is insertion succedded.
      */
-    template <typename key_type, typename value_type>
     bool sorted_load(std::pair<key_type, value_type> *buf, uint _begin, uint _end) 
     {
         // 1. We check whether the tree is empty: check @this->tail_leaf == nullptr
