@@ -6,15 +6,9 @@
 template<typename _key, typename _value>
 class DUAL_TREE_KNOBS
 {
+public:
     // The maximum number of tuples that the buffer can hold
     static const uint BUFFER_SIZE = 128;
-
-    // The size of blocks of tree in bytes.
-    static const uint BLOCK_SIZE = 4096;
-
-    // The number of blocks in the memory for each tree
-    static const uint BLOCKS_IN_MEMORY_PER_TREE = 100000;
-
 };
 
 /**
@@ -34,7 +28,9 @@ class buffer
     std::pair<_key,_value> buf[_knobs::BUFFER_SIZE];
     
 public:
-    Buffer() {  size = 0;}
+    buffer() { size = 0;}
+
+    std::pair<_key,_value> getTuple(uint index){return buf[index];}
 
     bool add_tuple(std::pair<_key, _value> new_tuple)
     {
@@ -58,7 +54,7 @@ public:
      * 3. Use a heap to store all subarrays, sort them by their lengths. 
      * 4. After the scanning, try to append subarrays to the @sorted_tree one by one from the heap.
      */
-    void flush_tuples(BeTree<_key, _value> unsorted_tree, BeTree<_key, _value> sorted_tree) 
+    void flush_tuples(BeTree<_key, _value> &unsorted_tree, BeTree<_key, _value> &sorted_tree) 
     {
         bool comp=[](std::pair<uint, uint> a, std::pair<uint, uint> b)
         {
@@ -74,8 +70,7 @@ public:
         std::priority_queue<std::pair<uint, uint>, std::vector<std::pair<uint, uint>>, 
             decltype(comp)> pq(comp);
         uint i = 0;
-        while(buf[i].first <= sorted_tree.max_key && buf[i].first >= sorted_tree.min_key 
-        && i < this->size)
+        while(buf[i].first <= sorted_tree.max_key && i < this->size)
         {
             unsorted_tree.insert(buf[i].first, buf[i].second);
             i += 1;
@@ -86,11 +81,10 @@ public:
             i += 1;
             while(i < this->size)
             {
-                if(buf[i].first <= sorted_tree.max_key && buf[i].first >= sorted_tree.min_key)
+                if(buf[i].first <= sorted_tree.max_key)
                 {
                     pq.push(std::pair<uint, uint>(begin, i-1));
-                    while(buf[i].first <= sorted_tree.max_key && buf[i].first >= sorted_tree.min_key
-                    && i < this->size)
+                    while(buf[i].first <= sorted_tree.max_key && i < this->size)
                     {
                         unsorted_tree.insert(buf[i].first, buf[i].second);
                         i += 1;
@@ -116,48 +110,76 @@ public:
             uint end = t.second;
             // check the begin position of the subarray, during the insertion, newly added 
             //tuples may overlap with other subarrays
-            if(buf[begin].first <= sorted_tree.max_key && buf[begin].first >= sorted_tree.min_key) 
+            if(buf[begin].first <= sorted_tree.max_key) 
             {
                 uint j = t.first;
-                while(buf[j].first <= sorted_tree.max_key && buf[j].first >= sorted_tree.min_key && 
-                j <= end) 
+                while(buf[j].first <= sorted_tree.max_key && j <= end) 
                     unsorted_tree.insert(buf[j].first, buf[j].second);
                 if(j > end) 
                     continue;
                 begin = j;
             }
             // check the end position of the subarray for the same reason as the begin position.
-            if(buf[end].first <= sorted_tree.max_key && buf[end].first >= sorted_tree.min_key) 
+            if(buf[end].first <= sorted_tree.max_key) 
             {
                 uint j = end;
-                while(buf[j].first <= sorted_tree.max_key && buf[j].first >= sorted_tree.min_key &&
-                j >= begin) 
+                while(buf[j].first <= sorted_tree.max_key && j >= begin) 
                     unsorted_tree.insert(buf[j].first, buf[j].second);
                 if(j < begin)
                     continue;
                 end = j;
             }
-            
+            sorted_tree.sorted_load(buf, begin, end);
         }
     }
 
 
 };
 
-template <typename _key, typename _value, typename _knobs=BeTree_Default_Knobs<_key, _value>,
-            typename _compare=std::less<_key>>
+template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
+            typename _betree_knobs=BeTree_Default_Knobs<_key, _value>, typename _compare=std::less<_key>>
 class dual_tree
 {
-    // Left tree to hold unsorted data.
-    BeTree<_key, _value, _knobs, _compare> left_tree("manager", "./left_tree_dat", DUAL_TREE_KNOBS::BLOCK_SIZE, 
-        DUAL_TREE_KNOBS::BLOCKS_IN_MEMORY_PER_TREE);
+    // Left tree to accept unsorted input data.
+    BeTree<_key, _value, _knobs, _compare> left_tree("manager", "./left_tree_dat", 
+    _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
 
-    // Right tree to hold sorted data.
-    BeTree<_key, _value, _knobs, _compare> right_tree("manager", "./right_tree_dat", DUAL_TREE_KNOBS::BLOCK_SIZE,
-        DUAL_TREE_KNOBS::BLOCKS_IN_MEMORY_PER_TREE);
+    // Right tree to accept sorted input data.
+    BeTree<_key, _value, _knobs, _compare> right_tree("manager", "./right_tree_dat",
+        _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
     
-    buffer<_key, _value, _compare> buf();
+    buffer<_key, _value, _dual_tree_knobs, _compare> *buf;
 
+public:
+
+    dual_tree(){buf = new buffer<_key, _value, _dual_tree_knobs, _compare>();}
+    ~dual_tree(){delete buf;}
+    bool insert_tuple(_key key, _value value)
+    {
+        if(!buf->add_tuple(std::pair<_key, _value>(key, value)))
+        {
+            buf->flush_tuples(this->left_tree, this->right_tree);
+        }
+    }
+
+    bool query(_key key)
+    {
+        // 1. Search the buffer for the key.
+        for(int i = 0; i < buf->size; i++)
+        {
+            if(buf->getTuple(i).first == key)
+            {
+                return true;
+            }
+        }
+        // 2. Search both trees for the key.
+        return left_tree.query(key) && right_tree.query(key);
+    }
+
+    std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
+    {
+        
+    }
 };
 
 #endif
