@@ -1714,6 +1714,143 @@ public:
         return true;
     }
 
+    bool insert_to_tail_leaf(key_type key, value_type val)
+    { 
+        if(tail_leaf != nullptr && tail_leaf->getDataSize() < knobs::NUM_DATA_PAIRS-1)
+        {
+            tail_leaf.insertInLeaf(std::pair<key_type, value_type>(key, val));
+            return true;
+        }
+        else
+        {
+            // No tuple has been inserted or the current tail leaf is full
+            uint new_leaf_id = manager->allocate();
+            BeNode<key_type, value_type, knobs, compare> *leaf = 
+                new BeNode<key_type, value_type, knobs, compare>(manager, new_leaf_id);
+            leaf.insertInLeaf(std::pair<key_type, value_type>(key, val));
+            if(tail_leaf == nullptr)
+            {
+                // No tuples has been inserted before.
+                root = leaf;
+                root->setRoot(true);
+                head_leaf = leaf;
+                head_leaf_id = leaf->getId();
+                tail_leaf = leaf;
+                tail_leaf_id = leaf->getId();
+
+                min_key = key;
+                max_key = key;
+            }
+            else
+            {
+                // the tree is non-empty
+                max_key = key;
+                if(root->isLeaf())
+                {   
+                    // only one node in the tree, the split is simple
+                    key_type split_key_new = root->getDataPairKey(root->getDataSize()-1);
+
+                    uint new_root_id = manager->allocate();
+                    BeNode<key_type, value_type, knobs, compare> *new_root = 
+                        new BeNode<key_type, value_type, knobs, compare>(manager, new_root_id);
+                    new_root->setRoot(true);
+
+                    new_root->setChildKey(split_key_new, 0);
+                    new_root->setPivot(root->getId(), 0);
+                    new_root->setPivot(leaf->getId(), 1);
+                    new_root->setPivotCounter(new_root->getPivotsCtr + 2);
+                    manager->addDirtyNode(new_root_id);
+
+                    root->setRoot(false);
+                    root->setNextNode(leaf->getId());
+
+                    // set parents
+                    leaf->setParent(new_root_id);
+                    root->setParent(new_root_id);
+
+                    manager->addDirtyNode(leaf->getId());
+                    manager->addDirtyNode(root->getId());
+
+                    root = new_root;
+
+                    tail_leaf = leaf;
+                    tail_leaf_id = leaf->getId(); 
+                }  
+                else
+                {
+                    // The tree exists and:
+                    // add the leaf is enough or a split of internal node(s) is needed
+                    key_type split_key = tail_leaf->getDataPairKey(tail_leaf->getDataSize()-1);
+                    uint new_node_id = leaf->getId();
+                    leaf->setParent(tail_leaf->getParent());
+                    tail_leaf->setNextNode(leaf->getId());
+
+                    manager->addDirtyNode(leaf->getId());
+                    manager->addDirtyNode(tail_leaf->getId());
+
+                    tail_leaf = leaf;
+                    tail_leaf_id = leaf->getId();
+
+                    // reload the newly added node
+                    BeNode<key_type, value_type, knobs, compare> new_node(manager, leaf->getId());
+                    while(true)
+                    {
+                        BeNode<key_type, value_type, knobs, compare> child_parent(manager, 
+                            new_node.getParent());
+                        bool flag = child_parent.addPivot(split_key, new_node_id);
+                        manager->addDirtyNode(child_parent.getId());
+                        if(!flag)
+                        {
+                            // Do not need split any more
+                            break;
+                        }
+                        if(child_parent.isRoot())
+                        {
+                            // Split root, and after spliting the root, the entire splitting process
+                            //ends. 
+                            // Here the splitInternal() will change the value @new_node_id to the 
+                            //id of the node that is newly splitted.
+                            child_parent.splitInternal(split_key, traits, new_node_id);
+                            BeNode<key_type, value_type, knobs, compare> new_sibling(manager, new_node_id);
+                            manager->addDirtyNode(new_node_id);
+                            traits.internal_splits++;
+
+                            uint new_root_id = manager->allocate();
+                            BeNode<key_type, value_type, knobs, compare> *new_root = new 
+                                BeNode<key_type, value_type, knobs, compare>(manager, new_root_id);
+                            new_root->setRoot(true);
+                            manager->addDirtyNode(new_root_id);
+
+                            new_root->setChildKey(split_key, 0);
+                            new_root->setPivot(child_parent.getId(), 0);
+                            new_root->setPivot(child_parent.getId(), 1);
+                            new_root->setPivotCounter(new_root->getPivotsCtr() + 2);
+
+                            child_parent.setRoot(false);
+                            child_parent.setParent(new_root->getId());
+                            manager->addDirtyNode(child_parent.getId());
+                            new_sibling.setParent(new_root->getId());
+                            manager->addDirtyNode(new_sibling.getId());
+
+                            root = new_root;
+                            break;
+                        }
+
+                        // The parent node is not root, we just split it, and to see whether another 
+                        //split is needed.
+                        child_parent.splitInternal(spplit_key, traits, new_node_id);
+                        traits.internal_splits++;
+                        manager->addDirtyNode(child_parent.getId());
+                        new_node.setToId(new_node_id);
+                        manager->addDirtyNode(new_node_id);
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
     bool query(key_type key, key_type high = -1)
     {
         if (high < 0)
