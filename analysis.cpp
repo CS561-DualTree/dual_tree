@@ -1,9 +1,20 @@
 #include <iostream>
 #include "betree.h"
+#include "dual_tree.h"
 
 using namespace std; 
 
-int main()
+void dual_tree_test()
+{
+   dual_tree<int, int> dt;
+   int n = 100000;
+   for(int i = 0; i < n; i++)
+   {
+       dt.insert_tuple(i+1, i+1);
+   }
+}
+
+void b_plus_tree_test()
 {
     // init a tree that takes integers for both key and value
     // the first argument is the name of the block manager for the cache (can be anything)
@@ -32,5 +43,11 @@ int main()
     }
     cout << "Not found Keys = " << key << endl;
 
-    return 1; 
+}
+
+int main()
+{
+    dual_tree_test();
+
+    return 1;
 }
