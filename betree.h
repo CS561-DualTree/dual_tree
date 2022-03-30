@@ -1723,6 +1723,7 @@ public:
             uint new_leaf_id = manager->allocate();
             BeNode<key_type, value_type, knobs, compare> *leaf = 
                 new BeNode<key_type, value_type, knobs, compare>(manager, new_leaf_id);
+            leaf->setLeaf(true);
             leaf->insertInLeaf(std::pair<key_type, value_type>(key, val));
             root = leaf;
             root->setRoot(true);
@@ -1747,6 +1748,7 @@ public:
         tail_leaf->splitLeaf(split_key_leaf, this->traits, new_leaf_id);
         BeNode<key_type, value_type, knobs, compare> *new_leaf = 
             new BeNode<key_type, value_type, knobs, compare>(manager, new_leaf_id);
+        new_leaf->setLeaf(true);
         if(root->isLeaf())
         {   
             // only one node in the tree, the split is simple

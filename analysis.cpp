@@ -12,6 +12,14 @@ void dual_tree_test()
    {
        dt.insert_tuple(i+1, i+1);
    }
+   for(int i = 9; i < n; i++) 
+   {
+       if(!dt.query(i+1))
+       {
+           cout<<"Not Found!!!";
+           return;
+       }
+   }
 }
 
 void b_plus_tree_test()
@@ -48,6 +56,6 @@ void b_plus_tree_test()
 int main()
 {
     dual_tree_test();
-
+    //b_plus_tree_test();
     return 1;
 }

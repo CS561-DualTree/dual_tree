@@ -29,9 +29,9 @@ public:
     // Default constructor, disable the buffer.
     dual_tree()
     {   
-        unsorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./unsorted_tree_dat", 
+        unsorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./tree_dat", 
     _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
-        sorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./sorted_tree_dat", 
+        sorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./tree_dat", 
     _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
     }
 
