@@ -42,8 +42,11 @@ public:
         delete unsorted_tree;
     }
 
+    uint sorted_tree_size() { return sorted_size;}
 
-    bool insert_tuple(_key key, _value value)
+    uint unsorted_tree_size() { return unsorted_size;}
+
+    bool insert(_key key, _value value)
     {
         if(sorted_size == 0)
         {
