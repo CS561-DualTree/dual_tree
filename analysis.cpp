@@ -17,6 +17,7 @@ void dual_tree_test(const std::vector<int>& data_set)
     std::cout << "Data Load time For dual tree(us):" << duration.count() << std::endl;
     std::cout << "Sorted tree size: " << dt.sorted_tree_size() << std::endl;
     std::cout << "Unsorted tree size: " << dt.unsorted_tree_size() << std::endl;
+    dt.fanout();
 }
 
 void b_plus_tree_test(const std::vector<int>& data_set)
@@ -64,6 +65,7 @@ int main(int argc, char **argv)
     data.resize(filesize / sizeof(int));
     ifs.read((char*)data.data(), filesize);
 
+    dual_tree<int, int>::show_tree_knobs();
 
     dual_tree_test(data);
     b_plus_tree_test(data);

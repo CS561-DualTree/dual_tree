@@ -87,7 +87,6 @@ public:
 };
 
 // structure that holds all stats for the tree
-
 struct BeTraits
 {
     int internal_flushes = 0;
@@ -475,7 +474,7 @@ public:
      *  returns: new node id
      *  Function: splits leaf into two
      */
-    int splitLeaf(key_type &split_key, BeTraits &traits, uint &new_id)
+    int splitLeaf(key_type &split_key, BeTraits &traits, uint &new_id, const float split_frac = 0.5)
     {
 
         // make sure that caller is a leaf node
@@ -497,7 +496,7 @@ public:
         traits.num_blocks++;
 
         // start moving data pairs
-        int start_index = data->size / 2;
+        int start_index = data->size * split_frac;
 #ifdef SPLIT70
         start_index = 0.7 * (data->size);
 #elif SPLIT80
@@ -515,8 +514,11 @@ public:
 
 #if defined(SPLIT70) || defined(SPLIT80) || defined(BULKLOAD)
         assert(data->size >= new_sibling.data->size);
-#else
-        assert(data->size <= new_sibling.data->size);
+#else   
+        if(split_frac <= 0.5)
+            assert(data->size <= new_sibling.data->size);
+        else
+            assert(data->size >= new_sibling.data->size);
 #endif
 
         // change current node's next node to new_node
@@ -536,7 +538,7 @@ public:
      *  Function: splits internal node into two. Distributes
      *              buffer and pivots as required
      */
-    int splitInternal(key_type &split_key, BeTraits &traits, uint &new_id)
+    int splitInternal(key_type &split_key, BeTraits &traits, uint &new_id, const float split_frac = 0.5)
     {
 
         open();
@@ -559,7 +561,7 @@ public:
         BeNode temp_mover(manager, new_id);
 
         // move half the pivots to the new node
-        int start_index = (getPivotsCtr()) / 2;
+        int start_index = (getPivotsCtr()) * split_frac;
 
 #ifdef SPLIT70
         start_index = 0.7 * (getPivotsCtr());
@@ -1476,11 +1478,14 @@ public:
     uint head_leaf_id;
     uint tail_leaf_id;
 
+    float split_frac;
+
     _Key min_key;
     _Key max_key;
 
 public:
-    BeTree(std::string _name, std::string _rootDir, unsigned long long _size_of_each_block, uint _blocks_in_memory) : tail_leaf(nullptr), head_leaf(nullptr)
+    BeTree(std::string _name, std::string _rootDir, unsigned long long _size_of_each_block, 
+        uint _blocks_in_memory, float split_frac=0.5) : tail_leaf(nullptr), head_leaf(nullptr), split_frac(split_frac)
     {
         manager = new BlockManager(_name, _rootDir, _size_of_each_block, _blocks_in_memory);
 
@@ -1492,28 +1497,10 @@ public:
         head_leaf_id = root_id;
         tail_leaf_id = root_id;
 
-        std::cout << "B Epsilon Tree" << std::endl;
-        std::cout << "Number of Upserts = " << knobs::NUM_UPSERTS << std::endl;
-        std::cout << "Number of Pivots = " << knobs::NUM_PIVOTS << std::endl;
-        std::cout << "Number of Children = " << knobs::NUM_CHILDREN << std::endl;
-        std::cout << "Number of Data pairs = " << knobs::NUM_DATA_PAIRS << std::endl;
-
-#ifdef UNITTEST
-
-#else
-        std::cout << "Block Size = " << knobs::BLOCK_SIZE << std::endl;
-        std::cout << "Data Size = " << knobs::DATA_SIZE << std::endl;
-        std::cout << "Block Size = " << knobs::BLOCK_SIZE << std::endl;
-        std::cout << "Metadata Size = " << knobs::METADATA_SIZE << std::endl;
-        std::cout << "Unit Size = " << knobs::UNIT_SIZE << std::endl;
-        std::cout << "Pivots Size = " << knobs::PIVOT_SIZE << std::endl;
-        std::cout << "Buffer Size = " << knobs::BUFFER_SIZE << std::endl;
-#endif
     }
 
     ~BeTree()
     {
-
         delete root;
         delete manager;
     }
@@ -1570,7 +1557,7 @@ public:
             if (flag)
             {
                 key_type split_key_new;
-                root->splitLeaf(split_key_new, traits, new_id);
+                root->splitLeaf(split_key_new, traits, new_id, split_frac);
                 BeNode<key_type, value_type, knobs, compare> new_leaf(manager, new_id);
                 traits.leaf_splits++;
 
@@ -1745,7 +1732,8 @@ public:
         }
         key_type split_key_leaf = tail_leaf->getDataPairKey(tail_leaf->getDataSize() - 1);
         uint new_leaf_id = manager->allocate();
-        tail_leaf->splitLeaf(split_key_leaf, this->traits, new_leaf_id);
+        tail_leaf->splitLeaf(split_key_leaf, this->traits, new_leaf_id, split_frac);
+        traits.leaf_splits++;
         BeNode<key_type, value_type, knobs, compare> *new_leaf = 
             new BeNode<key_type, value_type, knobs, compare>(manager, new_leaf_id);
         new_leaf->setLeaf(true);
@@ -1814,7 +1802,7 @@ public:
                     //ends. 
                     // Here the splitInternal() will change the value @new_node_id to the 
                     //id of the node that is newly splitted.
-                    child_parent.splitInternal(split_key, traits, new_node_id);
+                    child_parent.splitInternal(split_key, traits, new_node_id, split_frac);
                     BeNode<key_type, value_type, knobs, compare> new_sibling(manager, new_node_id);
                     manager->addDirtyNode(new_node_id);
                     traits.internal_splits++;
@@ -1842,7 +1830,7 @@ public:
 
                 // The parent node is not root, we just split it, and to see whether another 
                 //split is needed.
-                child_parent.splitInternal(split_key, traits, new_node_id);
+                child_parent.splitInternal(split_key, traits, new_node_id, split_frac);
                 traits.internal_splits++;
                 manager->addDirtyNode(child_parent.getId());
                 new_node.setToId(new_node_id);
@@ -2254,7 +2242,7 @@ public:
 
         traits.max_fanout = max;
         traits.min_fanout = min;
-        traits.average_fanout = ceil(total / num);
+        traits.average_fanout = num == 0 ? 0 : ceil(total / num);
         traits.num_nodes = n;
 
         delete[] arr;

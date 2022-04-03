@@ -8,11 +8,19 @@ class DUAL_TREE_KNOBS
 {
 public:
     // The maximum number of tuples that the buffer can hold
-    static const uint BUFFER_SIZE = 128;
+    static const uint BUFFER_SIZE = 128; 
+
+    // Sorted tree split fraction, it will affect the space utilization of the tree. It means how
+    // many elements will stay in the original node.
+    static constexpr float SORTED_TREE_SPLIT_FRAC = 0.5;
+
+    // Unsorted tree splitting fraction.
+    static constexpr float UNSORTED_TREE_SPLIT_FRAC = 0.5;
 };
 
 template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
-            typename _betree_knobs=BeTree_Default_Knobs<_key, _value>, typename _compare=std::less<_key>>
+            typename _betree_knobs = BeTree_Default_Knobs<_key, _value>, 
+            typename _compare=std::less<_key>>
 class dual_tree
 {
     // Left tree to accept unsorted input data.
@@ -30,9 +38,9 @@ public:
     dual_tree()
     {   
         unsorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./tree_dat", 
-    _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
+    _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY, DUAL_TREE_KNOBS<_key, _value>::UNSORTED_TREE_SPLIT_FRAC);
         sorted_tree = new BeTree<_key, _value, _betree_knobs, _compare>("manager", "./tree_dat", 
-    _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY);
+    _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY, DUAL_TREE_KNOBS<_key, _value>::SORTED_TREE_SPLIT_FRAC);
     }
 
     // Deconstructor
@@ -91,6 +99,56 @@ public:
         std::vector<std::pair<_key, _value>> sorted_res = sorted_tree.rangeQuery(low, high);
         unsorted_res.insert(unsorted_res.end(), sorted_res.begin(), sorted_res.end());
         return unsorted_res;
+    }
+
+    void fanout()
+    {
+        sorted_tree->fanout();
+        std::cout << "Sorted Tree: number of splitting leaves = " << sorted_tree->traits.leaf_splits
+            << std::endl;
+        std::cout << "Sorted Tree: number of splitting internal nodes = " << 
+            sorted_tree->traits.internal_splits << std::endl;
+        std::cout << "Sorted Tree: number of leaves = " << sorted_tree->traits.num_leaf_nodes 
+            << std::endl;
+        std::cout << "Sorted Tree: number of internal nodes = " << 
+            sorted_tree->traits.num_internal_nodes << std::endl;
+
+        unsorted_tree->fanout();
+        std::cout << "Unsorted Tree: number of splitting leaves = " << unsorted_tree->traits.leaf_splits
+            << std::endl;
+        std::cout << "Unsorted Tree: number of splitting internal nodes = " << 
+            unsorted_tree->traits.internal_splits << std::endl;
+        std::cout << "Unsorted Tree: number of leaves = " << unsorted_tree->traits.num_leaf_nodes 
+            << std::endl;
+        std::cout << "Unsorted Tree: number of internal nodes = " << 
+            unsorted_tree->traits.num_internal_nodes << std::endl;
+    }
+
+    static void show_tree_knobs()
+    {
+        std::cout << "B Epsilon Tree Knobs:" << std::endl;
+        std::cout << "Number of Upserts = " << _betree_knobs::NUM_UPSERTS << std::endl;
+        std::cout << "Number of Pivots = " << _betree_knobs::NUM_PIVOTS << std::endl;
+        std::cout << "Number of Children = " << _betree_knobs::NUM_CHILDREN << std::endl;
+        std::cout << "Number of Data pairs = " << _betree_knobs::NUM_DATA_PAIRS << std::endl;
+#ifdef UNITTEST
+
+#else
+        std::cout << "Block Size = " << _betree_knobs::BLOCK_SIZE << std::endl;
+        std::cout << "Data Size = " << _betree_knobs::DATA_SIZE << std::endl;
+        std::cout << "Block Size = " << _betree_knobs::BLOCK_SIZE << std::endl;
+        std::cout << "Metadata Size = " << _betree_knobs::METADATA_SIZE << std::endl;
+        std::cout << "Unit Size = " << _betree_knobs::UNIT_SIZE << std::endl;
+        std::cout << "Pivots Size = " << _betree_knobs::PIVOT_SIZE << std::endl;
+        std::cout << "Buffer Size = " << _betree_knobs::BUFFER_SIZE << std::endl;
+#endif
+        std::cout << "--------------------------------------------------------------------------" << std::endl;
+
+        std::cout << "Dual Tree Knobs:" << std::endl;
+        std::cout << "Sorted tree split fraction = " << DUAL_TREE_KNOBS<_key, _value>::SORTED_TREE_SPLIT_FRAC << std::endl;
+        std::cout << "Unsorted tree split fraction = " << DUAL_TREE_KNOBS<_key, _value>::UNSORTED_TREE_SPLIT_FRAC << std::endl;
+
+        std::cout << "--------------------------------------------------------------------------" << std::endl;
     }
 };
 
