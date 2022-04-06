@@ -460,8 +460,10 @@ public:
         // set node as dirty
         manager->addDirtyNode(id);
 
+        // TODO: Here we change the comparison between "std::pair"s to "std::pair::first" since 
+        //the workload generator may produce duplicated key.
         if (data->size > 0)
-            assert(element >= data->data[data->size - 1]);
+            assert(element.first >= data->data[data->size - 1].first);
 
         data->data[data->size++] = element;
 

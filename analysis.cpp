@@ -1,4 +1,5 @@
 #include <iostream>
+#include <thread>
 #include "betree.h"
 #include "dual_tree.h"
 
@@ -68,6 +69,7 @@ int main(int argc, char **argv)
     dual_tree<int, int>::show_tree_knobs();
 
     dual_tree_test(data);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     b_plus_tree_test(data);
     return 0;
 }
