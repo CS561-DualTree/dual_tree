@@ -18,6 +18,10 @@ public:
     // the heap, when the heap size reaches the threshold, pop the root tuple of the heap and add it to one of the trees.
     // Note that a big heap will cost huge overhead.
     static const uint HEAP_SIZE = 16;
+
+    // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
+    //tuple in the sorted tree.
+    static const uint TOLERANCE_FACTOR = 100;
 };
 
 template <typename _key, typename _value, typename _compare=std::less<_key>>
@@ -29,6 +33,73 @@ public:
         _compare cmp{};
         return !cmp(p1.first, p2.first);
     }
+};
+
+
+// This class is used to detector outlier in the newly inserted tuples with respect to the sorted tree
+template<typename _key>
+class outlier_detector
+{
+private:
+    // The default value of @average_distance.
+    static constexpr double INIT_AVG = -1;
+
+    // The average distance between any two consecutive keys of tuples in the sorted tree.
+    double avg_distance;
+
+    // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
+    //tuple in the sorted tree. When the distance is greater than @avg_distance * @tolerance_factor,
+    //the newly added tuple should be added to the unsorted tree.
+    double tolerance_factor;
+
+    // The most recently added key of the sorted tree;
+    _key previous_key;
+
+public:
+
+    outlier_detector(double tolerance_factor):tolerance_factor(tolerance_factor), avg_distance(-1){}
+
+    double get_avg_distance() {return avg_distance;}
+
+    /**
+     *  Check whether a key is an outlier with repsect to the sorted tree.
+     * @param new_key The pending new key
+     * @param num_tuples Size of the sorted tree.
+    */
+    bool is_outlier(const _key& new_key, const uint& num_tuples)
+    {
+        if(avg_distance == INIT_AVG)
+        {
+            if(num_tuples == 0){
+                // no tuple has been added to the sorted tree.
+                previous_key = new_key;
+            }
+            else
+            {
+                assert(num_tuples == 1);
+                avg_distance = new_key - previous_key;
+                previous_key = new_key;
+            }
+            return false;
+        }
+        else
+        {
+            double new_distance = new_key - previous_key;
+            if(new_key - previous_key >= avg_distance * tolerance_factor)
+            {
+                return true;
+            }
+            else
+            {
+                // update the average;
+                avg_distance = ((double)(avg_distance * num_tuples + new_key - previous_key)) /
+                    (num_tuples + 1);
+                previous_key = new_key;
+                return false;
+            }
+        }
+    }
+
 };
 
 template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
@@ -48,6 +119,8 @@ class dual_tree
     std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>, 
         key_comparator<_key, _value>> *heap_buf;
 
+    outlier_detector<_key> *od;
+
 
 public:
 
@@ -63,6 +136,7 @@ public:
         if(_dual_tree_knobs::HEAP_SIZE != 0) 
             heap_buf = new std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>,
                 key_comparator<_key, _value>>();
+        od = new outlier_detector<_key>(_dual_tree_knobs::TOLERANCE_FACTOR);
     }
 
     // Deconstructor
@@ -108,7 +182,8 @@ public:
         }
         else 
         {
-            if(inserted_key < sorted_tree->getMaximumKey())
+            if(inserted_key < sorted_tree->getMaximumKey() ||
+                (inserted_key > sorted_tree->getMaximumKey() && od->is_outlier(inserted_key, sorted_size)))
             {
                 unsorted_tree->insert(inserted_key, inserted_value);
                 unsorted_size += 1;
@@ -156,6 +231,7 @@ public:
             << std::endl;
         std::cout << "Sorted Tree: number of internal nodes = " << 
             sorted_tree->traits.num_internal_nodes << std::endl;
+        std::cout << "Average Distance between tuples = " << this->od->get_avg_distance() << std::endl;
 
         unsorted_tree->fanout();
         std::cout << "Unsorted Tree: number of splitting leaves = " << unsorted_tree->traits.leaf_splits
@@ -192,6 +268,7 @@ public:
         std::cout << "Sorted tree split fraction = " << _dual_tree_knobs::SORTED_TREE_SPLIT_FRAC << std::endl;
         std::cout << "Unsorted tree split fraction = " << _dual_tree_knobs::UNSORTED_TREE_SPLIT_FRAC << std::endl;
         std::cout << "Heap buffer size = " << _dual_tree_knobs::HEAP_SIZE << std::endl;
+        std::cout << "Outlier tolerance factor = " << _dual_tree_knobs::TOLERANCE_FACTOR << std::endl;
 
         std::cout << "--------------------------------------------------------------------------" << std::endl;
     }
