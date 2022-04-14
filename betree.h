@@ -1523,6 +1523,18 @@ public:
         return max_key;
     }
 
+    key_type get_tail_leaf_minimum_key()
+    {
+        if(tail_leaf == nullptr)
+        {
+            return min_key;
+        }
+        else
+        {
+            return tail_leaf->getDataPairKey(0);
+        }
+    }
+
 public:
     bool insert(key_type key, value_type value)
     {
@@ -1703,7 +1715,15 @@ public:
         return true;
     }
 
-    bool insert_to_tail_leaf(key_type key, value_type val)
+    /**
+     * Insert a new tuple to the tail leaf of the tree.
+     * @param key The new key
+     * @param val The new value
+     * @param append True if the new tuple is supposed to append to the last slot, false if the new 
+     *          new tuple is supposed to insert to the middle of the leaf.
+     * @return True if succeed inserting the tuple, else return false;
+    */
+    bool insert_to_tail_leaf(key_type key, value_type val, bool append)
     {   
         bool need_split;
         if(tail_leaf == nullptr)
@@ -1725,8 +1745,17 @@ public:
             max_key = key;
             return true;
         }
-        need_split = tail_leaf->insertInLeaf(std::pair<key_type, value_type>(key, val));
-        max_key = key;
+        if(append)
+        {
+            need_split = tail_leaf->insertInLeaf(std::pair<key_type, value_type>(key, val));
+            max_key = key;
+        }
+        else
+        {
+            std::pair<key_type, value_type> a[] = {std::pair<key_type, value_type>(key, val)};
+            int num_to_insert = 1;
+            need_split = tail_leaf->insertInLeaf(a, num_to_insert);
+        }
         if(!need_split)
         {
             // No split is needed

@@ -20,8 +20,13 @@ public:
     static const uint HEAP_SIZE = 16;
 
     // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
-    //tuple in the sorted tree.
+    //tuple in the sorted tree. If set it to 0, the dual tree will disable the outlier detector.
     static const uint TOLERANCE_FACTOR = 100;
+
+    // When it is true, tuples that are less than maximum key of the sorted tree and are greater than minimum key of
+    //the tail leaf of the sorted tree will be inserted to the tail leaf. If it is false, then only tuples that are 
+    //greater than maximum key of the sorted tree is allowed to inserted into the sorted tree.
+    static const bool ALLOW_SORTED_TREE_INSERTION = true;
 };
 
 template <typename _key, typename _value, typename _compare=std::less<_key>>
@@ -49,7 +54,7 @@ private:
 
     // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
     //tuple in the sorted tree. When the distance is greater than @avg_distance * @tolerance_factor,
-    //the newly added tuple should be added to the unsorted tree.
+    //the newly added tuple should be added to the unsorted tree. Should be greater than 0.
     double tolerance_factor;
 
     // The most recently added key of the sorted tree;
@@ -68,6 +73,11 @@ public:
     */
     bool is_outlier(const _key& new_key, const uint& num_tuples)
     {
+        if(tolerance_factor <= 0)
+        {
+            // If the tolerance_factor is less or equal to 0, then stop use it.
+            return false;
+        }
         if(avg_distance == INIT_AVG)
         {
             if(num_tuples == 0){
@@ -97,6 +107,18 @@ public:
                 previous_key = new_key;
                 return false;
             }
+        }
+    }
+
+    /**
+     * This function is only called after inserting(not appending) a tuple to the tail leaf of the
+     * sorted tree. 
+    */
+    void update_avg_distance(const int& num_tuples)
+    {
+        if(tolerance_factor > 0)
+        {
+            avg_distance = ((double)(avg_distance * num_tuples + 1) / (num_tuples + 1));
         }
     }
 
@@ -146,6 +168,7 @@ public:
         delete unsorted_tree;
         if(_dual_tree_knobs::HEAP_SIZE != 0)
             delete heap_buf;
+        delete od;
     }
 
     uint sorted_tree_size() { return sorted_size;}
@@ -177,12 +200,14 @@ public:
         if(sorted_size == 0)
         {
             // The first tuple is always inserted to the 
-            sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value);
+            sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, true);
             sorted_size += 1;
         }
         else 
         {
-            if(inserted_key < sorted_tree->getMaximumKey() ||
+            _key lower_bound = _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION ? sorted_tree->get_tail_leaf_minimum_key():
+                sorted_tree->getMaximumKey();
+            if(inserted_key < lower_bound ||
                 (inserted_key > sorted_tree->getMaximumKey() && od->is_outlier(inserted_key, sorted_size)))
             {
                 unsorted_tree->insert(inserted_key, inserted_value);
@@ -190,8 +215,12 @@ public:
             }
             else
             {
-                sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value);
+                // When _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION is false, @append is always true.
+                bool append = inserted_key >= sorted_tree->getMaximumKey();
+                sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, append);
                 sorted_size += 1;
+                if(!append)
+                    od->update_avg_distance(sorted_size);
             }
         }
         return true;
@@ -269,6 +298,7 @@ public:
         std::cout << "Unsorted tree split fraction = " << _dual_tree_knobs::UNSORTED_TREE_SPLIT_FRAC << std::endl;
         std::cout << "Heap buffer size = " << _dual_tree_knobs::HEAP_SIZE << std::endl;
         std::cout << "Outlier tolerance factor = " << _dual_tree_knobs::TOLERANCE_FACTOR << std::endl;
+        std::cout << "Allow sorted tree insertion = " << _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION << std::endl;
 
         std::cout << "--------------------------------------------------------------------------" << std::endl;
     }
