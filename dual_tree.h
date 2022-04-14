@@ -240,6 +240,36 @@ public:
         
     }
 
+    // helper function used for parallel query, query a single tree
+    // query sorted tree if tree == 0, query unsorted tree otherwise
+    void querySingleTree(int tree, _key key, std::promise<bool> &promiseObj) {
+        if (tree == 0) {
+            promiseObj.set_value(sorted_tree->query(key));
+        } else {
+            promiseObj.set_value(unsorted_tree->query(key));
+        }
+    }
+
+    // query both trees in parallel
+    bool parallelQuery(_key key) {
+
+        // fire up a thread to query the sorted tree
+        std::promise<bool> sortedPromise;
+        std::future<bool> sortedFuture = sortedPromise.get_future();
+        std::thread sortedQuery(&dual_tree::querySingleTree, this, 0, key, std::ref(sortedPromise));
+
+        // fire up another thread to query the unsorted tree
+        std::promise<bool> unsortedPromise;
+        std::future<bool> unsortedFuture = unsortedPromise.get_future();
+        std::thread unsortedQuery(&dual_tree::querySingleTree, this, 1, key, std::ref(unsortedPromise));
+
+        // wait for the thread to finish
+        sortedQuery.join();
+        unsortedQuery.join();
+
+        return sortedFuture.get() || unsortedFuture.get();
+    }
+
     std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
     {
         // Range query in both tree.
