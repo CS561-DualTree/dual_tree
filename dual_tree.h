@@ -27,6 +27,11 @@ public:
     //the tail leaf of the sorted tree will be inserted to the tail leaf. If it is false, then only tuples that are 
     //greater than maximum key of the sorted tree is allowed to inserted into the sorted tree.
     static const bool ALLOW_SORTED_TREE_INSERTION = true;
+
+    // Query buffer size for determine which tree to query first statistically. When it is set to zero, we simply make the decision
+    // based on the size of sorted and unsorted trees. When it is set to a non-zero value, we compare the number of top QUERY_BUFFER_SIZE
+    // queries and query the most queried tree first.
+    static const uint QUERY_BUFFER_SIZE = 20;
 };
 
 template <typename _key, typename _value, typename _compare=std::less<_key>>
@@ -123,6 +128,73 @@ public:
     }
 
 };
+
+template <typename _key>
+class MRU_query_buffer
+{
+
+private:
+
+    // put 1 into the buffer if current query can be answered in the sorted tree
+    uint sorted = 1;
+
+    // put 0 into the buffer if current query can be answered in the unsorted tree
+    uint unsorted = 0;
+
+    // buffer that holds the latest buffer_size number of queried tree in chronological order
+    uint[] *buffer;
+
+    // size of buffer we used for predicting next query
+    uint buffer_size;
+
+    // index pointer that points to the next position in the buffer array that need to be poped
+    int buffer_ptr;
+
+    // number of sorted tree query in the latest buffer_size number of queries
+    int sorted_counter;
+    
+    // number of unsorted tree query in the latest buffer_size number of queries
+    int unsorted_counter;
+
+public:
+
+    // constructor
+    MRU_query_buffer(uint size)
+    {
+        buffer_size = size
+        buffer = new uint[buffer_size];
+        buffer_ptr = 0;
+        sorted_counter = 0;
+        unsorted_counter = 0;
+    }
+
+    void update_ptr()
+    {
+        buffer_ptr = (buffer_ptr + 1) % buffer_size;
+    }
+
+    void update_buffer(uint next)
+    {
+        uint poped = buffer[buffer_ptr];
+        if (poped != NULL) {
+            sorted_counter -= poped == sorted;
+            unsorted -= poped == unsorted;
+        }
+        buffer[buffer_ptr] = next;
+        sorted_counter += next == sorted;
+        unsorted_counter += next == unsorted;
+
+        update_ptr();
+    }
+
+    int predict()
+    {
+        return sorted_counter >= unsorted_counter;
+    }
+
+    
+
+}
 
 template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
             typename _betree_knobs = BeTree_Default_Knobs<_key, _value>, 
