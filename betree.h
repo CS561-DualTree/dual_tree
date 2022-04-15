@@ -1565,6 +1565,11 @@ public:
                 min_key = key;
                 max_key = key;
             }
+            else
+            {
+                min_key = key < min_key? key: min_key;
+                max_key = key > max_key? key: max_key;
+            }
 
             // if flag returns true, it means we need to split the current leaf (actually the root)
             // once split, we create a new root that points to these two leaves
@@ -1736,11 +1741,13 @@ public:
             leaf->insertInLeaf(std::pair<key_type, value_type>(key, val));
             root = leaf;
             root->setRoot(true);
+            manager->addDirtyNode(root->getId());
+
             head_leaf = leaf;
             head_leaf_id = leaf->getId();
             tail_leaf = leaf;
             tail_leaf_id = leaf->getId();
-
+            
             min_key = key;
             max_key = key;
             return true;
@@ -1759,6 +1766,7 @@ public:
         if(!need_split)
         {
             // No split is needed
+            manager->addDirtyNode(tail_leaf_id);
             return true;
         }
         key_type split_key_leaf = tail_leaf->getDataPairKey(tail_leaf->getDataSize() - 1);
@@ -2375,6 +2383,22 @@ public:
     unsigned long long getNumReads() { return manager->num_reads; }
 
     unsigned long long getNumWrites() { return manager->num_writes; }
+
+    unsigned long long getNumKeys()
+    {
+        if(tail_leaf == head_leaf)
+            return tail_leaf->getDataSize();
+        BeNode<key_type, value_type, knobs, compare>* tmp = head_leaf;
+        unsigned long long cnt = 0;
+        while(*tmp->getNextNode() != tail_leaf->getId())
+        {
+            cnt += tmp->getDataSize();
+            tmp->setToId(*tmp->getNextNode());
+        }
+        cnt += tmp->getDataSize();
+        cnt += tail_leaf->getDataSize();
+        return cnt;
+    }
 
     uint getNumBlocks() { return manager->current_blocks; }
 

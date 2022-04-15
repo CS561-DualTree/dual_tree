@@ -144,6 +144,20 @@ class dual_tree
     outlier_detector<_key> *od;
 
 
+    template <class T, class S, class C>
+    S& container(std::priority_queue<T, S, C>& q)
+    {
+        struct HackedQueue : private std::priority_queue<T, S, C>
+        {
+            static S& Container(std::priority_queue<T, S, C>& q)
+            {
+                return q.*&HackedQueue::c;
+            }
+        };
+        return HackedQueue::Container(q);
+    }
+
+
 public:
 
     // Default constructor, disable the buffer.
@@ -228,7 +242,16 @@ public:
 
     bool query(_key key)
     {
-        // First search the one with less tuples.
+        // Search the buffer
+        std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
+        for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
+        {
+            if((*it).first == key) 
+            {
+                return true;
+            }
+        }
+        // Search the one with less tuples at first.
         if(sorted_size < unsorted_size)
         {
             return sorted_tree->query(key) || unsorted_tree->query(key);
@@ -271,6 +294,7 @@ public:
             << std::endl;
         std::cout << "Unsorted Tree: number of internal nodes = " << 
             unsorted_tree->traits.num_internal_nodes << std::endl;
+        std::cout << "Heap buf size = " << this->heap_buf->size() << std::endl;
     }
 
     static void show_tree_knobs()
@@ -302,6 +326,9 @@ public:
 
         std::cout << "--------------------------------------------------------------------------" << std::endl;
     }
-};
+
+    unsigned long long get_sorted_tree_true_size() {return sorted_tree->getNumKeys();}
+
+    unsigned long long get_unsorted_tree_true_size() {return unsorted_tree->getNumKeys();}};
 
 #endif
