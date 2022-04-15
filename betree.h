@@ -1850,12 +1850,11 @@ public:
                     BeNode<key_type, value_type, knobs, compare> *new_root = new 
                         BeNode<key_type, value_type, knobs, compare>(manager, new_root_id);
                     new_root->setRoot(true);
-                    manager->addDirtyNode(new_root_id);
-
                     new_root->setChildKey(split_key, 0);
                     new_root->setPivot(child_parent.getId(), 0);
-                    new_root->setPivot(child_parent.getId(), 1);
+                    new_root->setPivot(new_sibling.getId(), 1);
                     new_root->setPivotCounter(new_root->getPivotsCtr() + 2);
+                    manager->addDirtyNode(new_root_id);
 
                     child_parent.setRoot(false);
                     child_parent.setParent(new_root->getId());
