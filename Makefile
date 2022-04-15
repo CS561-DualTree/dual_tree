@@ -1,7 +1,7 @@
 
 
 MKDIR_P = mkdir -p
-all: analysis workloadgenerator
+all: analysis workloadgenerator test_query
 	$(MKDIR_P) tree_dat
 	
 simple_analysis: betree.h dual_tree.h analysis.cpp -DBPLUS

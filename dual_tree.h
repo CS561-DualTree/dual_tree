@@ -2,6 +2,9 @@
 #define DUEALTREE_H
 #include "betree.h"
 #include <stdlib.h>
+#include <chrono>
+#include <thread>
+#include <future>
 
 template<typename _key, typename _value>
 class DUAL_TREE_KNOBS
@@ -384,6 +387,11 @@ public:
         return true;
     }
 
+    bool queryBuffer(_key key) 
+    {
+
+    }
+
     bool query(_key key)
     {
         bool found;
@@ -417,7 +425,8 @@ public:
 
     // helper function used for parallel query, query a single tree
     // query sorted tree if tree == 0, query unsorted tree otherwise
-    void querySingleTree(int tree, _key key, std::promise<bool> &promiseObj) {
+    void querySingleTree(int tree, _key key, std::promise<bool> &promiseObj) 
+    {
         if (tree == 0) {
             promiseObj.set_value(sorted_tree->query(key));
         } else {
@@ -426,7 +435,8 @@ public:
     }
 
     // query both trees in parallel
-    bool parallelQuery(_key key) {
+    bool parallelQuery(_key key) 
+    {
 
         // fire up a thread to query the sorted tree
         std::promise<bool> sortedPromise;
@@ -438,11 +448,22 @@ public:
         std::future<bool> unsortedFuture = unsortedPromise.get_future();
         std::thread unsortedQuery(&dual_tree::querySingleTree, this, 1, key, std::ref(unsortedPromise));
 
-        // wait for the thread to finish
-        sortedQuery.join();
-        unsortedQuery.join();
+        // // wait for the thread to finish
+        // sortedQuery.join();
+        // unsortedQuery.join();
+        std::chrono::milliseconds span (10);
+        while(true) {
+            if (sortedFuture.wait_for(span) == std::future_status::ready && sortedFuture.get()) 
+            {
+                return true;
+            } 
+            else if (unsortedFuture.wait_for(span) == std::future_status::ready && unsortedFuture.get()) 
+            {
+                return true;
+            }
+        }
 
-        return sortedFuture.get() || unsortedFuture.get();
+        return false;
     }
 
     bool MRU_query(_key key)
