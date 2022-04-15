@@ -129,20 +129,20 @@ public:
 
 };
 
-template <typename _key>
+template<typename T>
 class MRU_query_buffer
 {
 
 private:
 
     // put 1 into the buffer if current query can be answered in the sorted tree
-    uint sorted = 1;
+    int sorted = 0;
 
     // put 0 into the buffer if current query can be answered in the unsorted tree
-    uint unsorted = 0;
+    int unsorted = 1;
 
     // buffer that holds the latest buffer_size number of queried tree in chronological order
-    uint[] *buffer;
+    int* buffer;
 
     // size of buffer we used for predicting next query
     uint buffer_size;
@@ -161,8 +161,8 @@ public:
     // constructor
     MRU_query_buffer(uint size)
     {
-        buffer_size = size
-        buffer = new uint[buffer_size];
+        buffer_size = size;
+        buffer = new int[buffer_size] { -1 };
         buffer_ptr = 0;
         sorted_counter = 0;
         unsorted_counter = 0;
@@ -176,11 +176,12 @@ public:
     void update_buffer(uint next)
     {
         uint poped = buffer[buffer_ptr];
-        if (poped != NULL) {
-            sorted_counter -= poped == sorted;
-            unsorted -= poped == unsorted;
-        }
+
+        sorted_counter -= poped == sorted;
+        unsorted -= poped == unsorted;
+
         buffer[buffer_ptr] = next;
+
         sorted_counter += next == sorted;
         unsorted_counter += next == unsorted;
 
@@ -189,12 +190,14 @@ public:
 
     int predict()
     {
-        return sorted_counter >= unsorted_counter;
+        return unsorted_counter > sorted_counter;
     }
 
-    
-
-}
+    bool buffer_full()
+    {
+        return unsorted_counter + sorted_counter == buffer_size;
+    }
+};
 
 template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
             typename _betree_knobs = BeTree_Default_Knobs<_key, _value>, 
@@ -215,6 +218,7 @@ class dual_tree
 
     outlier_detector<_key> *od;
 
+    MRU_query_buffer<_key> *query_buf;
 
 public:
 
@@ -231,6 +235,7 @@ public:
             heap_buf = new std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>,
                 key_comparator<_key, _value>>();
         od = new outlier_detector<_key>(_dual_tree_knobs::TOLERANCE_FACTOR);
+        query_buf = new MRU_query_buffer<_key>(_dual_tree_knobs::QUERY_BUFFER_SIZE);
     }
 
     // Deconstructor
@@ -241,6 +246,7 @@ public:
         if(_dual_tree_knobs::HEAP_SIZE != 0)
             delete heap_buf;
         delete od;
+        delete query_buf;
     }
 
     uint sorted_tree_size() { return sorted_size;}
@@ -301,7 +307,7 @@ public:
     bool query(_key key)
     {
         // First search the one with less tuples.
-        if(sorted_size < unsorted_size)
+        if(sorted_size > unsorted_size)
         {
             return sorted_tree->query(key) || unsorted_tree->query(key);
         }
@@ -340,6 +346,23 @@ public:
         unsortedQuery.join();
 
         return sortedFuture.get() || unsortedFuture.get();
+    }
+
+    bool MRU_query(_key key)
+    {
+
+        if (query_buf->buffer_full())
+        {
+            if (query_buf->predict())
+            {
+                return unsorted_tree->query(key) || sorted_tree->query(key);
+            } else 
+            {
+                return sorted_tree->query(key) || unsorted_tree->query(key);
+            }
+        } else {
+            return query(key);
+        }
     }
 
     std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
@@ -401,6 +424,7 @@ public:
         std::cout << "Heap buffer size = " << _dual_tree_knobs::HEAP_SIZE << std::endl;
         std::cout << "Outlier tolerance factor = " << _dual_tree_knobs::TOLERANCE_FACTOR << std::endl;
         std::cout << "Allow sorted tree insertion = " << _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION << std::endl;
+        std::cout << "Query Buffer Size = " << _dual_tree_knobs::QUERY_BUFFER_SIZE << std::endl;
 
         std::cout << "--------------------------------------------------------------------------" << std::endl;
     }
