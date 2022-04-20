@@ -31,7 +31,7 @@ public:
     // Query buffer size for determine which tree to query first statistically. When it is set to zero, we simply make the decision
     // based on the size of sorted and unsorted trees. When it is set to a non-zero value, we compare the number of top QUERY_BUFFER_SIZE
     // queries and query the most queried tree first.
-    static const uint QUERY_BUFFER_SIZE = 20;
+    static const uint QUERY_BUFFER_SIZE = 10;
 };
 
 template <typename _key, typename _value, typename _compare=std::less<_key>>
@@ -175,10 +175,11 @@ public:
 
     void update_buffer(uint next)
     {
+        // std::cout << "before update buffer: " << buffer << " | sorted counter: " << sorted_counter << " | unsorted counter: " << unsorted_counter << " | buffer pointer: " << buffer_ptr << std::endl;
         uint poped = buffer[buffer_ptr];
 
         sorted_counter -= poped == sorted;
-        unsorted -= poped == unsorted;
+        unsorted_counter -= poped == unsorted;
 
         buffer[buffer_ptr] = next;
 
@@ -186,6 +187,7 @@ public:
         unsorted_counter += next == unsorted;
 
         update_ptr();
+        // std::cout << "before update buffer: " << buffer << " | sorted counter: " << sorted_counter << " | unsorted counter: " << unsorted_counter << " | buffer pointer: " << buffer_ptr << std::endl;
     }
 
     int predict()
@@ -195,7 +197,7 @@ public:
 
     bool buffer_full()
     {
-        return unsorted_counter + sorted_counter == buffer_size;
+        return unsorted_counter + sorted_counter == buffer_size && buffer_size != 0;
     }
 };
 
@@ -212,6 +214,14 @@ class dual_tree
     uint sorted_size;
 
     uint unsorted_size;
+
+    _key sorted_min;
+
+    _key sorted_max;
+
+    _key unsorted_min;
+
+    _key unsorted_max;
 
     std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>, 
         key_comparator<_key, _value>> *heap_buf;
@@ -245,6 +255,10 @@ public:
     _betree_knobs::BLOCK_SIZE, _betree_knobs::BLOCKS_IN_MEMORY, DUAL_TREE_KNOBS<_key, _value>::SORTED_TREE_SPLIT_FRAC);
         sorted_size = 0;
         unsorted_size = 0;
+
+        sorted_min, unsorted_min = INT_MAX;
+        sorted_max, unsorted_max = INT_MIN;
+
         if(_dual_tree_knobs::HEAP_SIZE != 0) 
             heap_buf = new std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>,
                 key_comparator<_key, _value>>();
@@ -266,6 +280,27 @@ public:
     uint sorted_tree_size() { return sorted_size;}
 
     uint unsorted_tree_size() { return unsorted_size;}
+
+    _key sorted_tree_min() { return sorted_min; }
+
+    _key sorted_tree_max() { return sorted_max; }
+
+    _key unsorted_tree_min() { return unsorted_min; }
+
+    _key unsorted_tree_max() { return unsorted_max; }
+
+    void update_domain_size(bool in_sorted, _key value)
+    {
+        if (in_sorted)
+        {
+            sorted_max = std::max(value, sorted_max);
+            sorted_min = std::min(value, sorted_min);
+        } else
+        {
+            unsorted_max = std::max(value, unsorted_max);
+            unsorted_min = std::min(value, unsorted_min);
+        }
+    }
 
     bool insert(_key key, _value value)
     {
@@ -293,6 +328,7 @@ public:
         {
             // The first tuple is always inserted to the 
             sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, true);
+            update_domain_size(true, key);
             sorted_size += 1;
         }
         else 
@@ -303,6 +339,7 @@ public:
                 (inserted_key > sorted_tree->getMaximumKey() && od->is_outlier(inserted_key, sorted_size)))
             {
                 unsorted_tree->insert(inserted_key, inserted_value);
+                update_domain_size(false, key);
                 unsorted_size += 1;
             }
             else
@@ -310,6 +347,7 @@ public:
                 // When _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION is false, @append is always true.
                 bool append = inserted_key >= sorted_tree->getMaximumKey();
                 sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, append);
+                update_domain_size(true, key);
                 sorted_size += 1;
                 if(!append)
                     od->update_avg_distance(sorted_size);
@@ -320,6 +358,21 @@ public:
 
     bool query(_key key)
     {
+        bool found;
+        // Search the one with more tuples at first.
+        if(sorted_size > unsorted_size)
+        {
+            found = sorted_tree->query(key) || unsorted_tree->query(key);
+        }
+        else
+        {
+            found = unsorted_tree->query(key) || sorted_tree->query(key);
+        }
+
+        if (found) {
+            return true;
+        }
+
         // Search the buffer
         std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
         for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
@@ -329,15 +382,8 @@ public:
                 return true;
             }
         }
-        // Search the one with less tuples at first.
-        if(sorted_size > unsorted_size)
-        {
-            return sorted_tree->query(key) || unsorted_tree->query(key);
-        }
-        else
-        {
-            return unsorted_tree->query(key) || sorted_tree->query(key);
-        }
+
+        return found;
         
     }
 
@@ -373,19 +419,60 @@ public:
 
     bool MRU_query(_key key)
     {
+        
+        bool found_in_tree;
 
         if (query_buf->buffer_full())
         {
+
             if (query_buf->predict())
             {
-                return unsorted_tree->query(key) || sorted_tree->query(key);
+                bool found = unsorted_tree->query(key);
+                query_buf->update_buffer(found);
+                found_in_tree = found || sorted_tree->query(key);
             } else 
             {
-                return sorted_tree->query(key) || unsorted_tree->query(key);
+                bool found = sorted_tree->query(key);
+                query_buf->update_buffer(!found);
+                found_in_tree = found || unsorted_tree->query(key);
             }
-        } else {
-            return query(key);
+
+            if (found_in_tree)
+            {
+                return true;
+            }
+
+        } else 
+        {
+            if (sorted_size > unsorted_size)
+            {
+                bool found = sorted_tree->query(key);
+                query_buf->update_buffer(!found);
+                found_in_tree = found || unsorted_tree->query(key);
+            } else
+            {
+                bool found = unsorted_tree->query(key);
+                query_buf->update_buffer(found);
+                found_in_tree = found || sorted_tree->query(key);
+            }
+            
+            if (found_in_tree)
+            {
+                return true;
+            }
+
         }
+
+        std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
+        for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
+        {
+            if((*it).first == key) 
+            {
+                return true;
+            }
+        }
+
+        return found_in_tree;
     }
 
     std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
