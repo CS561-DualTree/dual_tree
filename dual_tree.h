@@ -19,10 +19,21 @@ public:
     // Note that a big heap will cost huge overhead.
     static const uint HEAP_SIZE = 16;
 
-    // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
+    // The initial tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
     //tuple in the sorted tree. If set it to 0, the dual tree will disable the outlier detector.
-    static const uint TOLERANCE_FACTOR = 100;
+    static const uint INIT_TOLERANCE_FACTOR = 200;
 
+    // The minimum value of the TOLERANCE_FACTOR, when the value of tolerance factor is too small, 
+    //most tuples will be inserted to the unsorted tree, thus we need to keep the value from too small.
+    //This value should be less than @INIT_TOLERANCE_FACTOR
+    static constexpr float MIN_TOLERANCE_FACTOR = 50;
+
+    // The expected average distance between any two consecutive tuples in the sorted tree. This
+    //tuning knob helps to modify the tolerance factor in the outlier detector. If it is less or equal to 
+    //1, then the tolerance factor becomes a constant.
+    static constexpr float EXPECTED_AVG_DISTANCE = 2.5;
+
+  
     // When it is true, tuples that are less than maximum key of the sorted tree and are greater than minimum key of
     //the tail leaf of the sorted tree will be inserted to the tail leaf. If it is false, then only tuples that are 
     //greater than maximum key of the sorted tree is allowed to inserted into the sorted tree.
@@ -52,24 +63,53 @@ class outlier_detector
 {
 private:
     // The default value of @average_distance.
-    static constexpr double INIT_AVG = -1;
+    static constexpr float INIT_AVG = -1;
+
+    // The decrease ratio of @tolerance_factor
+    static constexpr float DECREASE_STEP = 0.90;
+
+    // The large decrease step of @tolerance(in ratio);
+    static constexpr float LARGE_DECREASE_STEP = 0.5;
+
+    // The decrease ratio of @tolerance_factor
+    static constexpr float INCREASE_STEP = 1.05;
+
+    // The maximum multiple of the difference between @avg_distance and @expected_avg_distance.
+    //If the distance exceed the multiple, then @LARGE_DECREASE_STEP instead of @DECREASE_STEP is used.
+    static const short MAX_MULTIPLE_DIFF = 20;
+
+    // The maximum difference between @avg_distance and @expected_avg_distance. If the difference 
+    //between those two variables exceeds this value, the @tolerance_factor need to decrease. This
+    //variable should be greater than 0;
+    static constexpr float MAX_DISTANCE_DIFF = 0.5;
+
+    // The minimum value of the INIT_TOLERANCE_FACTOR, when the value of tolerance factor is too small, 
+    //most tuples will be inserted to the unsorted tree, thus we need to keep the value from too small
+    const float min_tolerance_factor;
 
     // The average distance between any two consecutive keys of tuples in the sorted tree.
-    double avg_distance;
+    float avg_distance;
+
+    // The expected average distance.
+    const float expected_avg_distance;
 
     // The tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
     //tuple in the sorted tree. When the distance is greater than @avg_distance * @tolerance_factor,
     //the newly added tuple should be added to the unsorted tree. Should be greater than 0.
-    double tolerance_factor;
+    float tolerance_factor;
 
     // The most recently added key of the sorted tree;
     _key previous_key;
 
 public:
 
-    outlier_detector(double tolerance_factor):tolerance_factor(tolerance_factor), avg_distance(-1){}
+    outlier_detector(float tolerance_factor, float min_tolerance_factor, float expected_avg_distance=1):
+        tolerance_factor(tolerance_factor), expected_avg_distance(expected_avg_distance), 
+        min_tolerance_factor(min_tolerance_factor), avg_distance(-1){}
 
     double get_avg_distance() {return avg_distance;}
+
+    double get_tolerance_factor() { return tolerance_factor; }
 
     /**
      *  Check whether a key is an outlier with repsect to the sorted tree.
@@ -107,9 +147,28 @@ public:
             else
             {
                 // update the average;
-                avg_distance = ((double)(avg_distance * num_tuples + new_key - previous_key)) /
-                    (num_tuples + 1);
+                avg_distance = ((double)(avg_distance * (num_tuples-1) + new_key - previous_key)) /
+                    (num_tuples);
                 previous_key = new_key;
+
+                // adjust the tolerance factor
+                if(expected_avg_distance > 1)
+                {
+                    if(expected_avg_distance * MAX_MULTIPLE_DIFF < avg_distance)
+                        tolerance_factor *= LARGE_DECREASE_STEP;
+                    else
+                    {
+                        if(avg_distance - MAX_DISTANCE_DIFF > expected_avg_distance)
+                            tolerance_factor *= DECREASE_STEP;
+                        else if(expected_avg_distance - MAX_DISTANCE_DIFF > avg_distance)
+                            tolerance_factor *= INCREASE_STEP;
+                    }
+                }    
+                if(tolerance_factor < min_tolerance_factor)
+                {
+                    tolerance_factor = min_tolerance_factor;
+                }
+
                 return false;
             }
         }
@@ -123,7 +182,7 @@ public:
     {
         if(tolerance_factor > 0)
         {
-            avg_distance = ((double)(avg_distance * num_tuples + 1) / (num_tuples + 1));
+            avg_distance = ((double)(avg_distance * (num_tuples-1) + 1) / num_tuples);
         }
     }
 
@@ -262,7 +321,8 @@ public:
         if(_dual_tree_knobs::HEAP_SIZE != 0) 
             heap_buf = new std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>,
                 key_comparator<_key, _value>>();
-        od = new outlier_detector<_key>(_dual_tree_knobs::TOLERANCE_FACTOR);
+        od = new outlier_detector<_key>(_dual_tree_knobs::INIT_TOLERANCE_FACTOR, _dual_tree_knobs::MIN_TOLERANCE_FACTOR, 
+             _dual_tree_knobs::EXPECTED_AVG_DISTANCE);
         query_buf = new MRU_query_buffer<_key>(_dual_tree_knobs::QUERY_BUFFER_SIZE);
     }
 
@@ -495,7 +555,10 @@ public:
             << std::endl;
         std::cout << "Sorted Tree: number of internal nodes = " << 
             sorted_tree->traits.num_internal_nodes << std::endl;
-        std::cout << "Average Distance between tuples = " << this->od->get_avg_distance() << std::endl;
+        std::cout << "Sorted Tree: Maximum value = " << sorted_tree->getMaximumKey() << std::endl;
+        std::cout << "Sorted Tree: Minimum value = " << sorted_tree->getMinimumKey() << std::endl;
+        std::cout << "Sorted Tree: Average Distance between tuples = " << this->od->get_avg_distance() << std::endl;
+        std::cout << "Sorted Tree: Tolerance factor = " << this->od->get_tolerance_factor() << std::endl;
 
         unsorted_tree->fanout();
         std::cout << "Unsorted Tree: number of splitting leaves = " << unsorted_tree->traits.leaf_splits
@@ -506,6 +569,9 @@ public:
             << std::endl;
         std::cout << "Unsorted Tree: number of internal nodes = " << 
             unsorted_tree->traits.num_internal_nodes << std::endl;
+        std::cout << "Unsorted Tree: Maximum value = " << unsorted_tree->getMaximumKey() << std::endl;
+        std::cout << "Unsorted Tree: Minimum value = " << unsorted_tree->getMinimumKey() << std::endl;
+        
         std::cout << "Heap buf size = " << this->heap_buf->size() << std::endl;
     }
 
@@ -533,7 +599,9 @@ public:
         std::cout << "Sorted tree split fraction = " << _dual_tree_knobs::SORTED_TREE_SPLIT_FRAC << std::endl;
         std::cout << "Unsorted tree split fraction = " << _dual_tree_knobs::UNSORTED_TREE_SPLIT_FRAC << std::endl;
         std::cout << "Heap buffer size = " << _dual_tree_knobs::HEAP_SIZE << std::endl;
-        std::cout << "Outlier tolerance factor = " << _dual_tree_knobs::TOLERANCE_FACTOR << std::endl;
+        std::cout << "Initial outlier tolerance factor = " << _dual_tree_knobs::INIT_TOLERANCE_FACTOR << std::endl;
+        std::cout << "Minimum outlier tolerance factor = " << _dual_tree_knobs::MIN_TOLERANCE_FACTOR << std::endl;
+        std::cout << "Expected average distance = " << _dual_tree_knobs::EXPECTED_AVG_DISTANCE << std::endl;
         std::cout << "Allow sorted tree insertion = " << _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION << std::endl;
         std::cout << "Query Buffer Size = " << _dual_tree_knobs::QUERY_BUFFER_SIZE << std::endl;
 

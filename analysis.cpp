@@ -22,23 +22,6 @@ void dual_tree_test(const std::vector<int>& data_set)
     std::cout << "Unsorted Tree domain size: " << dt.unsorted_tree_min() << " - " << dt.unsorted_tree_max() << std::endl;
     dt.fanout();
 
-    int cnt1 = 0;
-    int cnt2 = 0;
-    int cnt = 0;
-    for(int i :data_set)
-    {
-        if(dt.query(i))
-            cnt1 += 1;
-        else
-        {
-            cnt2 += 1;
-            if(cnt2 <= 10)
-                std::cout << "Missing " << i << "in position " << cnt << std::endl;
-        }
-        cnt += 1;
-    }
-    std::cout<<"Query hit:" << cnt1 << std::endl;
-    std::cout<<"Query miss:" << cnt2 << std::endl;
 }
 
 void b_plus_tree_test(const std::vector<int>& data_set)
@@ -64,20 +47,6 @@ void b_plus_tree_test(const std::vector<int>& data_set)
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
     std::cout << "Data Load time For b plus tree(us):" << duration.count() << std::endl;
-    int cnt1 = 0;
-    int cnt2 = 0;
-    for(int i: data_set)
-    {
-        if(tree.query(i))
-            cnt1 += 1;
-        else
-        {
-            cnt2 += 1;
-            //std::cout << "Missing " << i << std::endl;
-        }
-    }
-    std::cout<<"Query hit:" << cnt1 << std::endl;
-    std::cout<<"Query miss:" << cnt2 << std::endl;
 
 }
 int main(int argc, char **argv)
