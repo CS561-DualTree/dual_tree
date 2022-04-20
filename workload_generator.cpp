@@ -128,7 +128,7 @@ int main(int argc, char **argv)
 
     unsigned long long domain = totalNumbers;
     unsigned long long windowSize = 1;
-    int seedValue = 1;
+    int seedValue = time(0);
 
     // simple checks
     if (totalNumbers < 0)
