@@ -102,17 +102,37 @@ void dual_tree_test_query(const std::vector<int>& data_set)
     std::cout << "Naive query with Periodic Workload Performance for dual tree(us):" << duration.count() << std::endl;
     std::cout << "Dual B+ Tree found " << counter << " out of " << p_queries.size() << std::endl;
 
-    // query the dual tree in parallel
-    // counter = 0;
-    // start = std::chrono::high_resolution_clock::now();
-    // for (int i : queries) 
-    // {
-    //     counter += dt.parallelQuery(i);
-    // }
-    // stop = std::chrono::high_resolution_clock::now();
-    // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-    // std::cout << "Prallel query time for dual tree(us):" << duration.count() << std::endl;
-    // std::cout << "Dual B+ Tree with Parallel read found " << counter << " out of " << data_set.size() << std::endl;
+    //query the dual tree in parallel
+    counter = 0;
+    start = std::chrono::high_resolution_clock::now();
+    for (int i : queries) 
+    {
+        counter += dt.parallelQuery(i);
+    }
+    stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "Parallel query with Random Workload Performance for dual tree(us):" << duration.count() << std::endl;
+    std::cout << "Dual B+ Tree with Parallel read found " << counter << " out of " << queries.size() << std::endl;
+
+    counter = 0;
+    start = std::chrono::high_resolution_clock::now();
+    for(int i: data_set){
+        counter += dt.parallelQuery(i);
+    }
+    stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "Parallel query with Sequential Workload Performance for dual tree(us):" << duration.count() << std::endl;
+    std::cout << "Dual B+ Tree with Parallel read found " << counter << " out of " << data_set.size() << std::endl;
+
+    counter = 0;
+    start = std::chrono::high_resolution_clock::now();
+    for(int i: p_queries){
+        counter += dt.parallelQuery(i);
+    }
+    stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "Parallel query with Periodic Workload Performance for dual tree(us):" << duration.count() << std::endl;
+    std::cout << "Dual B+ Tree with Parallel read found " << counter << " out of " <<p_queries.size() << std::endl;
 
 
     // query the dual tree using MRU

@@ -12,7 +12,7 @@ class DUAL_TREE_KNOBS
 public:
     // Sorted tree split fraction, it will affect the space utilization of the tree. It means how
     // many elements will stay in the original node.
-    static constexpr float SORTED_TREE_SPLIT_FRAC = 0.99;
+    static constexpr float SORTED_TREE_SPLIT_FRAC = 0.90;
 
     // Unsorted tree splitting fraction.
     static constexpr float UNSORTED_TREE_SPLIT_FRAC = 0.5;
@@ -41,6 +41,9 @@ public:
     //the tail leaf of the sorted tree will be inserted to the tail leaf. If it is false, then only tuples that are 
     //greater than maximum key of the sorted tree is allowed to inserted into the sorted tree.
     static const bool ALLOW_SORTED_TREE_INSERTION = true;
+
+    // Switch for paralley query
+    static const bool ENABLE_PARALLEL_QUERY = true;
 
     // Query buffer size for determine which tree to query first statistically. When it is set to zero, we simply make the decision
     // based on the size of sorted and unsorted trees. When it is set to a non-zero value, we compare the number of top QUERY_BUFFER_SIZE
@@ -263,38 +266,25 @@ public:
 template <typename T> 
 class query_queue
 {
-    std::queue<T>   *m_queue;
-    std::mutex      *m_mutex;
-    std::condition_variable *m_condv;
-
+    std::queue<T>   m_queue; 
 public:
-    query_queue() 
-    {
-        m_queue = new std::queue<T>();
-        m_mutex = new std::mutex();
-        m_condv = new std::condition_variable();
-    }
+    query_queue(){}
 
     void add(T item) 
     {
-        std::lock_guard<std::mutex> lock(*m_mutex);
-        m_queue->push(item);
-        m_condv->notify_one();
+        m_queue.push(item);
     }
 
     T remove() 
-    {
-        std::unique_lock<std::mutex> lock(*m_mutex);
+    { 
 
-        m_condv->wait(lock, [this]{
-            return(m_queue->size());
-        });
-
-        T item = m_queue->front();
-        m_queue->pop();
-        lock.unlock();
-
+        T item = m_queue.front();
+        m_queue.pop();
         return item;       
+    }
+
+    bool empty(){
+        return m_queue.empty();
     }
 };
 
@@ -302,31 +292,34 @@ template <typename _key, typename _value, typename _betree_knobs, typename _comp
 class query_thread
 {
     BeTree<_key, _value, _betree_knobs, _compare> *tree;
-    query_queue<_key> *in_queue;
+    query_queue<std::pair<bool, _key>> *in_queue;
     query_queue<bool> *out_queue;
+    // Keep the thread alive while the query_thread object is alive
+    std::thread *th;
     
 public:
-    query_thread(BeTree<_key, _value, _betree_knobs, _compare> *tree, query_queue<_key> *in_queue, query_queue<bool> *out_queue) 
-    {
-        tree = tree;
-        in_queue = in_queue;
-        out_queue = out_queue;
-        std::cout << "thread created" << std::endl;
-    }
+    query_thread(BeTree<_key, _value, _betree_knobs, _compare> *tree, query_queue<std::pair<bool, _key>> *in_queue, query_queue<bool> *out_queue):
+    tree(tree), in_queue(in_queue), out_queue(out_queue){}
 
     void work_loop() {
-        while(true) 
+        bool stop = false;
+        while(!stop) 
         {
-            _key key = in_queue->remove();
-            bool found = tree->query(key);
-            out_queue->add(found);
+            while(!in_queue->empty()){
+                std::pair<bool, _key> msg = in_queue->remove();
+                if(msg.first){
+                    stop = true;
+                    break;
+                }
+                bool found = tree->query(msg.second);
+                out_queue->add(found);
+            }
         }
     }
 
     void start() 
     {
-        std::thread th(&query_thread::work_loop, this);
-        std::cout << "thread started" << std::endl;
+        th = new std::thread(&query_thread::work_loop, this);
     }
 };
 
@@ -364,11 +357,10 @@ class dual_tree
         return HackedQueue::Container(q);
     }
 
-    query_queue<_key> *sorted_in_queue;
-    query_queue<bool> *sorted_out_queue;
-    query_thread<_key, _value, _betree_knobs, _compare> *sorted_query_thread;
-
-    query_queue<_key> *unsorted_in_queue;
+    // For in queue, we use one pair per element, the first value denotes whether this message in the
+    //queue is a "shutdown thread" message. When the first value is true, the consumer of the queue should
+    //finish its loop. 
+    query_queue <std::pair<bool, _key>> *unsorted_in_queue;
     query_queue<bool> *unsorted_out_queue;
     query_thread<_key, _value, _betree_knobs, _compare> *unsorted_query_thread;
 
@@ -390,33 +382,33 @@ public:
         od = new outlier_detector<_key>(_dual_tree_knobs::INIT_TOLERANCE_FACTOR, _dual_tree_knobs::MIN_TOLERANCE_FACTOR, 
              _dual_tree_knobs::EXPECTED_AVG_DISTANCE);
         query_buf = new MRU_query_buffer<_key>(_dual_tree_knobs::QUERY_BUFFER_SIZE);
-
-        sorted_in_queue = new query_queue<_key>();
-        sorted_out_queue = new query_queue<bool>();
-        sorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(sorted_tree, sorted_in_queue, sorted_out_queue);
-        sorted_query_thread->start();
-
-        unsorted_in_queue = new query_queue<_key>();
-        unsorted_out_queue = new query_queue<bool>();
-        unsorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(unsorted_tree, unsorted_in_queue, unsorted_out_queue);
-        unsorted_query_thread->start();
+        
+        if(_dual_tree_knobs::ENABLE_PARALLEL_QUERY){
+            unsorted_in_queue = new query_queue<std::pair<bool, _key>>();
+            unsorted_out_queue = new query_queue<bool>();
+            unsorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(unsorted_tree, unsorted_in_queue, unsorted_out_queue);
+            unsorted_query_thread->start();
+        }
     }
 
     // Deconstructor
     ~dual_tree()
     {
+        // Send message to end query threads
         delete sorted_tree;
         delete unsorted_tree;
         if(_dual_tree_knobs::HEAP_SIZE > 0)
             delete heap_buf;
         delete od;
         delete query_buf;
-        delete sorted_in_queue;
-        delete sorted_out_queue;
-        delete sorted_query_thread;
-        delete unsorted_in_queue;
-        delete unsorted_out_queue;
-        delete unsorted_query_thread;
+        if(_dual_tree_knobs::ENABLE_PARALLEL_QUERY){
+            unsorted_in_queue->add(std::pair<bool, _key>(true, sorted_tree->getMaximumKey()));
+            // sleep, wait enough time for the end of the query thread
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            delete unsorted_in_queue;
+            delete unsorted_out_queue;
+            delete unsorted_query_thread;
+        }
     }
 
     uint sorted_tree_size() { return sorted_size;}
@@ -498,17 +490,7 @@ public:
         }
 
         // Search the buffer
-        std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
-        for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
-        {
-            if((*it).first == key) 
-            {
-                return true;
-            }
-        }
-
-        return found;
-        
+        return _query_heap_buffer(key);
     }
 
     // helper function used for parallel query, query a single tree
@@ -525,10 +507,18 @@ public:
     // query both trees in parallel
     bool parallelQuery(_key key) 
     {
-        sorted_in_queue->add(key);
-        unsorted_in_queue->add(key);
+        if(!_dual_tree_knobs::ENABLE_PARALLEL_QUERY){
+           return MRU_query(key);
+        }
+        unsorted_in_queue->add(std::pair<bool, _key>(false, key));
+        bool sorted_tree_result = sorted_tree->query(key);
+        while(unsorted_out_queue->empty());
+        bool unsorted_tree_result = unsorted_out_queue->remove();
+        if(sorted_tree_result || unsorted_tree_result){
+            return true;
+        }
 
-        return sorted_out_queue->remove() || unsorted_out_queue->remove();
+        return _query_heap_buffer(key);
         
         // // fire up a thread to query the sorted tree
         // std::promise<bool> sortedPromise;
@@ -590,16 +580,7 @@ public:
 
         }
 
-        std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
-        for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
-        {
-            if((*it).first == key) 
-            {
-                return true;
-            }
-        }
-
-        return found_in_tree;
+        return _query_heap_buffer(key);   
     }
 
     std::vector<std::pair<_key, _value>> rangeQuery(_key low, _key high) 
@@ -697,7 +678,19 @@ private:
         }
     }
     
-    };
+    bool _query_heap_buffer(_key key){
+        std::vector<std::pair<_key, _value>> &tmp = container(*(this->heap_buf));
+        for(typename std::vector<std::pair<_key, _value>>::iterator it = tmp.begin(); it !=tmp.end(); it++)
+        {
+            if((*it).first == key) 
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+ 
+};
 
 
     
