@@ -2,9 +2,7 @@
 #define DUEALTREE_H
 #include "betree.h"
 #include <stdlib.h>
-#include <chrono>
 #include <thread>
-#include <future>
 
 template<typename _key, typename _value>
 class DUAL_TREE_KNOBS
@@ -260,6 +258,89 @@ public:
     }
 };
 
+template <typename T> 
+class query_queue
+{
+    std::queue<T>   m_queue;
+    std::mutex      m_mutex;
+    std::condition_variable m_condv;
+
+public:
+    // query_queue() 
+    // {
+    //     pthread_mutex_init(&m_mutex, NULL);
+    //     pthread_cond_init(&m_condv, NULL);
+    // }
+
+    // ~query_queue() 
+    // {
+    //     pthread_mutex_destroy(&m_mutex);
+    //     pthread_cond_destroy(&m_condv);
+    // }
+
+    void add(T item) 
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_queue.push(item);
+        m_condv.notify_one();
+    }
+
+    T remove() 
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        m_condv.wait(lock, [this]{
+            return(m_queue.size());
+        });
+
+        T item = m_queue.front();
+        m_queue.pop();
+        lock.unlock();
+
+        return item;       
+    }
+
+    // int size() 
+    // {
+    //     pthread_mutex_lock(&m_mutex);
+    //     int size = m_queue.size();
+    //     pthread_mutex_unlock(&m_mutex);
+    //     return size;
+    // }
+};
+
+template <typename _key, typename _value, typename _betree_knobs, typename _compare>
+class query_thread
+{
+    BeTree<_key, _value, _betree_knobs, _compare> *tree;
+    query_queue<_key> *in_queue;
+    query_queue<bool> *out_queue;
+    
+public:
+    query_thread(BeTree<_key, _value, _betree_knobs, _compare> *tree, query_queue<_key> *in_queue, query_queue<bool> *out_queue) 
+    {
+        tree = tree;
+        in_queue = in_queue;
+        out_queue = out_queue;
+        std::cout << "thread created" << std::endl;
+    }
+
+    void work_loop() {
+        while(true) 
+        {
+            _key key = in_queue->remove();
+            bool found = tree->query(key);
+            out_queue->add(found);
+        }
+    }
+
+    void start() 
+    {
+        std::thread th(&query_thread::work_loop, this);
+        std::cout << "thread started" << std::endl;
+    }
+};
+
 template <typename _key, typename _value, typename _dual_tree_knobs=DUAL_TREE_KNOBS<_key, _value>,
             typename _betree_knobs = BeTree_Default_Knobs<_key, _value>, 
             typename _compare=std::less<_key>>
@@ -294,6 +375,13 @@ class dual_tree
         return HackedQueue::Container(q);
     }
 
+    query_queue<_key> *sorted_in_queue;
+    query_queue<bool> *sorted_out_queue;
+    query_thread<_key, _value, _betree_knobs, _compare> *sorted_query_thread;
+
+    query_queue<_key> *unsorted_in_queue;
+    query_queue<bool> *unsorted_out_queue;
+    query_thread<_key, _value, _betree_knobs, _compare> *unsorted_query_thread;
 
 public:
 
@@ -313,6 +401,12 @@ public:
         od = new outlier_detector<_key>(_dual_tree_knobs::INIT_TOLERANCE_FACTOR, _dual_tree_knobs::MIN_TOLERANCE_FACTOR, 
              _dual_tree_knobs::EXPECTED_AVG_DISTANCE);
         query_buf = new MRU_query_buffer<_key>(_dual_tree_knobs::QUERY_BUFFER_SIZE);
+
+        sorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(sorted_tree, sorted_in_queue, sorted_out_queue);
+        sorted_query_thread->start();
+
+        unsorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(unsorted_tree, unsorted_in_queue, unsorted_out_queue);
+        unsorted_query_thread->start();
     }
 
     // Deconstructor
@@ -324,6 +418,12 @@ public:
             delete heap_buf;
         delete od;
         delete query_buf;
+        delete sorted_in_queue;
+        delete sorted_out_queue;
+        delete sorted_query_thread;
+        delete unsorted_in_queue;
+        delete unsorted_out_queue;
+        delete unsorted_query_thread;
     }
 
     uint sorted_tree_size() { return sorted_size;}
@@ -387,11 +487,6 @@ public:
         return true;
     }
 
-    bool queryBuffer(_key key) 
-    {
-
-    }
-
     bool query(_key key)
     {
         bool found;
@@ -437,33 +532,23 @@ public:
     // query both trees in parallel
     bool parallelQuery(_key key) 
     {
+        sorted_in_queue->add(key);
+        unsorted_in_queue->add(key);
 
-        // fire up a thread to query the sorted tree
-        std::promise<bool> sortedPromise;
-        std::future<bool> sortedFuture = sortedPromise.get_future();
-        std::thread sortedQuery(&dual_tree::querySingleTree, this, 0, key, std::ref(sortedPromise));
+        return sorted_out_queue->remove() || unsorted_out_queue->remove();
+        
+        // // fire up a thread to query the sorted tree
+        // std::promise<bool> sortedPromise;
+        // std::future<bool> sortedFuture = sortedPromise.get_future();
+        // std::thread sortedQuery(&dual_tree::querySingleTree, this, 0, key, std::ref(sortedPromise));
 
-        // fire up another thread to query the unsorted tree
-        std::promise<bool> unsortedPromise;
-        std::future<bool> unsortedFuture = unsortedPromise.get_future();
-        std::thread unsortedQuery(&dual_tree::querySingleTree, this, 1, key, std::ref(unsortedPromise));
+        // // query the unsorted tree in the main thread
+        // bool unsorted_found = unsorted_tree->query(key);
 
         // // wait for the thread to finish
         // sortedQuery.join();
-        // unsortedQuery.join();
-        std::chrono::milliseconds span (10);
-        while(true) {
-            if (sortedFuture.wait_for(span) == std::future_status::ready && sortedFuture.get()) 
-            {
-                return true;
-            } 
-            else if (unsortedFuture.wait_for(span) == std::future_status::ready && unsortedFuture.get()) 
-            {
-                return true;
-            }
-        }
 
-        return false;
+        // return sortedFuture.get() || unsorted_found;
     }
 
     bool MRU_query(_key key)
