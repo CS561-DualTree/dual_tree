@@ -21,12 +21,12 @@ public:
 
     // The initial tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
     //tuple in the sorted tree. If set it to 0, the dual tree will disable the outlier detector.
-    static const uint INIT_TOLERANCE_FACTOR = 200;
+    static const uint INIT_TOLERANCE_FACTOR = 100;
 
     // The minimum value of the TOLERANCE_FACTOR, when the value of tolerance factor is too small, 
     //most tuples will be inserted to the unsorted tree, thus we need to keep the value from too small.
     //This value should be less than @INIT_TOLERANCE_FACTOR
-    static constexpr float MIN_TOLERANCE_FACTOR = 50;
+    static constexpr float MIN_TOLERANCE_FACTOR = 20;
 
     // The expected average distance between any two consecutive tuples in the sorted tree. This
     //tuning knob helps to modify the tolerance factor in the outlier detector. If it is less or equal to 
@@ -65,23 +65,11 @@ private:
     // The default value of @average_distance.
     static constexpr float INIT_AVG = -1;
 
-    // The decrease ratio of @tolerance_factor
-    static constexpr float DECREASE_STEP = 0.90;
+    // The acceptble error that @avg_distance is greater than @expected_avg_distance. This 
+    //error cannot be guaranteed, but it will help outlier detector to control the tolerance factor 
+    //when abs(@expected_avg_distance - @avg_distance) > the error
+    static constexpr float ALLOWED_ERROR = 0.5;
 
-    // The large decrease step of @tolerance(in ratio);
-    static constexpr float LARGE_DECREASE_STEP = 0.5;
-
-    // The decrease ratio of @tolerance_factor
-    static constexpr float INCREASE_STEP = 1.05;
-
-    // The maximum multiple of the difference between @avg_distance and @expected_avg_distance.
-    //If the distance exceed the multiple, then @LARGE_DECREASE_STEP instead of @DECREASE_STEP is used.
-    static const short MAX_MULTIPLE_DIFF = 20;
-
-    // The maximum difference between @avg_distance and @expected_avg_distance. If the difference 
-    //between those two variables exceeds this value, the @tolerance_factor need to decrease. This
-    //variable should be greater than 0;
-    static constexpr float MAX_DISTANCE_DIFF = 0.5;
 
     // The minimum value of the INIT_TOLERANCE_FACTOR, when the value of tolerance factor is too small, 
     //most tuples will be inserted to the unsorted tree, thus we need to keep the value from too small
@@ -98,14 +86,33 @@ private:
     //the newly added tuple should be added to the unsorted tree. Should be greater than 0.
     float tolerance_factor;
 
+    // The initial tolerance factor. When the true @avg_distance is around @expected_avg_distance, then reset
+    // @toleranace_factor to the initial one.
+    const float init_tolerance_factor;
+
     // The most recently added key of the sorted tree;
     _key previous_key;
+
+private:
+
+    void update_tolerance_factor()
+    {
+        if(avg_distance < expected_avg_distance + ALLOWED_ERROR)
+        {
+            tolerance_factor = init_tolerance_factor;
+        }
+        else
+        {
+            tolerance_factor *= expected_avg_distance / avg_distance;
+        }
+        tolerance_factor = std::max(tolerance_factor, min_tolerance_factor);
+    }
 
 public:
 
     outlier_detector(float tolerance_factor, float min_tolerance_factor, float expected_avg_distance=1):
         tolerance_factor(tolerance_factor), expected_avg_distance(expected_avg_distance), 
-        min_tolerance_factor(min_tolerance_factor), avg_distance(-1){}
+        min_tolerance_factor(min_tolerance_factor), init_tolerance_factor(tolerance_factor), avg_distance(-1){}
 
     double get_avg_distance() {return avg_distance;}
 
@@ -154,20 +161,8 @@ public:
                 // adjust the tolerance factor
                 if(expected_avg_distance > 1)
                 {
-                    if(expected_avg_distance * MAX_MULTIPLE_DIFF < avg_distance)
-                        tolerance_factor *= LARGE_DECREASE_STEP;
-                    else
-                    {
-                        if(avg_distance - MAX_DISTANCE_DIFF > expected_avg_distance)
-                            tolerance_factor *= DECREASE_STEP;
-                        else if(expected_avg_distance - MAX_DISTANCE_DIFF > avg_distance)
-                            tolerance_factor *= INCREASE_STEP;
-                    }
-                }    
-                if(tolerance_factor < min_tolerance_factor)
-                {
-                    tolerance_factor = min_tolerance_factor;
-                }
+                    update_tolerance_factor();    
+                }     
 
                 return false;
             }
@@ -184,6 +179,8 @@ public:
         {
             avg_distance = ((double)(avg_distance * (num_tuples-1) + 1) / num_tuples);
         }
+        if(expected_avg_distance > 1)
+            update_tolerance_factor();
     }
 
 };
@@ -388,6 +385,7 @@ public:
         {
             // The first tuple is always inserted to the 
             sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, true);
+            od->is_outlier(inserted_key, sorted_size);
             update_domain_size(true, key);
             sorted_size += 1;
         }
