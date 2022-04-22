@@ -3,6 +3,8 @@
 #include "betree.h"
 #include <stdlib.h>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 
 template<typename _key, typename _value>
 class DUAL_TREE_KNOBS
@@ -261,52 +263,39 @@ public:
 template <typename T> 
 class query_queue
 {
-    std::queue<T>   m_queue;
-    std::mutex      m_mutex;
-    std::condition_variable m_condv;
+    std::queue<T>   *m_queue;
+    std::mutex      *m_mutex;
+    std::condition_variable *m_condv;
 
 public:
-    // query_queue() 
-    // {
-    //     pthread_mutex_init(&m_mutex, NULL);
-    //     pthread_cond_init(&m_condv, NULL);
-    // }
-
-    // ~query_queue() 
-    // {
-    //     pthread_mutex_destroy(&m_mutex);
-    //     pthread_cond_destroy(&m_condv);
-    // }
+    query_queue() 
+    {
+        m_queue = new std::queue<T>();
+        m_mutex = new std::mutex();
+        m_condv = new std::condition_variable();
+    }
 
     void add(T item) 
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_queue.push(item);
-        m_condv.notify_one();
+        std::lock_guard<std::mutex> lock(*m_mutex);
+        m_queue->push(item);
+        m_condv->notify_one();
     }
 
     T remove() 
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(*m_mutex);
 
-        m_condv.wait(lock, [this]{
-            return(m_queue.size());
+        m_condv->wait(lock, [this]{
+            return(m_queue->size());
         });
 
-        T item = m_queue.front();
-        m_queue.pop();
+        T item = m_queue->front();
+        m_queue->pop();
         lock.unlock();
 
         return item;       
     }
-
-    // int size() 
-    // {
-    //     pthread_mutex_lock(&m_mutex);
-    //     int size = m_queue.size();
-    //     pthread_mutex_unlock(&m_mutex);
-    //     return size;
-    // }
 };
 
 template <typename _key, typename _value, typename _betree_knobs, typename _compare>
@@ -402,9 +391,13 @@ public:
              _dual_tree_knobs::EXPECTED_AVG_DISTANCE);
         query_buf = new MRU_query_buffer<_key>(_dual_tree_knobs::QUERY_BUFFER_SIZE);
 
+        sorted_in_queue = new query_queue<_key>();
+        sorted_out_queue = new query_queue<bool>();
         sorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(sorted_tree, sorted_in_queue, sorted_out_queue);
         sorted_query_thread->start();
 
+        unsorted_in_queue = new query_queue<_key>();
+        unsorted_out_queue = new query_queue<bool>();
         unsorted_query_thread = new query_thread<_key, _value, _betree_knobs, _compare>(unsorted_tree, unsorted_in_queue, unsorted_out_queue);
         unsorted_query_thread->start();
     }
