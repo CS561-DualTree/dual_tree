@@ -18,8 +18,6 @@ void dual_tree_test(const std::vector<int>& data_set)
     std::cout << "Data Load time For dual tree(us):" << duration.count() << std::endl;
     std::cout << "Sorted tree size: " << dt.sorted_tree_size() << std::endl;
     std::cout << "Unsorted tree size: " << dt.unsorted_tree_size() << std::endl;
-    std::cout << "Sorted Tree domain size: " << dt.sorted_tree_min() << " - " << dt.sorted_tree_max() << std::endl;
-    std::cout << "Unsorted Tree domain size: " << dt.unsorted_tree_min() << " - " << dt.unsorted_tree_max() << std::endl;
     dt.fanout();
 
 }

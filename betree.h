@@ -1475,6 +1475,9 @@ public:
 
     BeNode<key_type, value_type, knobs, compare> *tail_leaf;
 
+    // This field is used by the sorted tree of the dual_tree system.
+    BeNode<key_type, value_type, knobs, compare> *second_tail_leaf;
+
     BeNode<key_type, value_type, knobs, compare> *head_leaf;
 
     uint head_leaf_id;
@@ -1534,6 +1537,15 @@ public:
             return tail_leaf->getDataPairKey(0);
         }
     }
+
+    bool is_only_one_leaf(){
+        return tail_leaf != nullptr && tail_leaf == head_leaf;
+    } 
+
+    key_type get_second_tail_leaf_maximum_ley(){
+        assert(second_tail_leaf != nullptr);
+        return second_tail_leaf->getLastDataPair().first;
+    }   
 
 public:
     bool insert(key_type key, value_type value)
@@ -1733,14 +1745,11 @@ public:
         bool need_split;
         if(tail_leaf == nullptr)
         {
-            // No tuple has been inserted, the tree is empty
-            uint new_leaf_id = manager->allocate();
-            BeNode<key_type, value_type, knobs, compare> *leaf = 
-                new BeNode<key_type, value_type, knobs, compare>(manager, new_leaf_id);
+            // No tuple has been inserted, the tree is empty, but a root node is created when the
+            //constructor was called, so we directly use it.
+            BeNode<key_type, value_type, knobs, compare> *leaf = root;
             leaf->setLeaf(true);
             leaf->insertInLeaf(std::pair<key_type, value_type>(key, val));
-            root = leaf;
-            root->setRoot(true);
             manager->addDirtyNode(root->getId());
 
             head_leaf = leaf;
@@ -1804,6 +1813,7 @@ public:
 
             root = new_root;
 
+            second_tail_leaf = tail_leaf;
             tail_leaf = new_leaf;
             tail_leaf_id = new_leaf->getId(); 
         }  
@@ -1819,6 +1829,7 @@ public:
             manager->addDirtyNode(new_leaf->getId());
             manager->addDirtyNode(tail_leaf->getId());
 
+            second_tail_leaf = tail_leaf;
             tail_leaf = new_leaf;
             tail_leaf_id = new_leaf->getId();
 

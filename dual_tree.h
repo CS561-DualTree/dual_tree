@@ -9,7 +9,7 @@ class DUAL_TREE_KNOBS
 public:
     // Sorted tree split fraction, it will affect the space utilization of the tree. It means how
     // many elements will stay in the original node.
-    static constexpr float SORTED_TREE_SPLIT_FRAC = 0.9;
+    static constexpr float SORTED_TREE_SPLIT_FRAC = 0.99;
 
     // Unsorted tree splitting fraction.
     static constexpr float UNSORTED_TREE_SPLIT_FRAC = 0.5;
@@ -17,7 +17,7 @@ public:
     // Heap buffer size(in number of tuples), default is 0. When it is non-zero, newly added tuples will be put into 
     // the heap, when the heap size reaches the threshold, pop the root tuple of the heap and add it to one of the trees.
     // Note that a big heap will cost huge overhead.
-    static const uint HEAP_SIZE = 16;
+    static const uint HEAP_SIZE = 15;
 
     // The initial tolerance threshold, determine whether the key of the newly added tuple is too far from the previous
     //tuple in the sorted tree. If set it to 0, the dual tree will disable the outlier detector.
@@ -271,14 +271,6 @@ class dual_tree
 
     uint unsorted_size;
 
-    _key sorted_min;
-
-    _key sorted_max;
-
-    _key unsorted_min;
-
-    _key unsorted_max;
-
     std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>, 
         key_comparator<_key, _value>> *heap_buf;
 
@@ -312,10 +304,7 @@ public:
         sorted_size = 0;
         unsorted_size = 0;
 
-        sorted_min, unsorted_min = INT_MAX;
-        sorted_max, unsorted_max = INT_MIN;
-
-        if(_dual_tree_knobs::HEAP_SIZE != 0) 
+        if(_dual_tree_knobs::HEAP_SIZE > 0) 
             heap_buf = new std::priority_queue<std::pair<_key, _value>, std::vector<std::pair<_key, _value>>,
                 key_comparator<_key, _value>>();
         od = new outlier_detector<_key>(_dual_tree_knobs::INIT_TOLERANCE_FACTOR, _dual_tree_knobs::MIN_TOLERANCE_FACTOR, 
@@ -328,7 +317,7 @@ public:
     {
         delete sorted_tree;
         delete unsorted_tree;
-        if(_dual_tree_knobs::HEAP_SIZE != 0)
+        if(_dual_tree_knobs::HEAP_SIZE > 0)
             delete heap_buf;
         delete od;
         delete query_buf;
@@ -338,41 +327,24 @@ public:
 
     uint unsorted_tree_size() { return unsorted_size;}
 
-    _key sorted_tree_min() { return sorted_min; }
-
-    _key sorted_tree_max() { return sorted_max; }
-
-    _key unsorted_tree_min() { return unsorted_min; }
-
-    _key unsorted_tree_max() { return unsorted_max; }
-
-    void update_domain_size(bool in_sorted, _key value)
-    {
-        if (in_sorted)
-        {
-            sorted_max = std::max(value, sorted_max);
-            sorted_min = std::min(value, sorted_min);
-        } else
-        {
-            unsorted_max = std::max(value, unsorted_max);
-            unsorted_min = std::min(value, unsorted_min);
-        }
-    }
 
     bool insert(_key key, _value value)
     {
         _key inserted_key = key;
         _value inserted_value = value;
-        if(_dual_tree_knobs::HEAP_SIZE != 0)
+        if(_dual_tree_knobs::HEAP_SIZE > 0)
         {
             assert(heap_buf->size() <= _dual_tree_knobs::HEAP_SIZE);
             if(heap_buf->size() == _dual_tree_knobs::HEAP_SIZE)
             {
-                heap_buf->push(std::pair<_key, _value>(inserted_key, inserted_value));
-                std::pair<_key, _value> tmp = heap_buf->top();
-                heap_buf->pop();
-                inserted_key = tmp.first;
-                inserted_value = tmp.second;
+                if(key > heap_buf->top().first)
+                {
+                    std::pair<_key, _value> tmp = heap_buf->top();
+                    heap_buf->pop();
+                    heap_buf->push(std::pair<_key, _value>(inserted_key, inserted_value));
+                    inserted_key = tmp.first;
+                    inserted_value = tmp.second;
+                }
             }
             else
             {
@@ -386,18 +358,17 @@ public:
             // The first tuple is always inserted to the 
             sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, true);
             od->is_outlier(inserted_key, sorted_size);
-            update_domain_size(true, key);
             sorted_size += 1;
         }
         else 
         {
-            _key lower_bound = _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION ? sorted_tree->get_tail_leaf_minimum_key():
-                sorted_tree->getMaximumKey();
-            if(inserted_key < lower_bound ||
+            bool no_lower_bound;
+            _key lower_bound = _get_insertion_range_lower_bound(no_lower_bound);
+            bool less_than_lower_bound = !no_lower_bound && inserted_key < lower_bound; 
+            if(less_than_lower_bound ||
                 (inserted_key > sorted_tree->getMaximumKey() && od->is_outlier(inserted_key, sorted_size)))
             {
                 unsorted_tree->insert(inserted_key, inserted_value);
-                update_domain_size(false, key);
                 unsorted_size += 1;
             }
             else
@@ -405,7 +376,6 @@ public:
                 // When _dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION is false, @append is always true.
                 bool append = inserted_key >= sorted_tree->getMaximumKey();
                 sorted_tree->insert_to_tail_leaf(inserted_key, inserted_value, append);
-                update_domain_size(true, key);
                 sorted_size += 1;
                 if(!append)
                     od->update_avg_distance(sorted_size);
@@ -608,6 +578,29 @@ public:
 
     unsigned long long get_sorted_tree_true_size() {return sorted_tree->getNumKeys();}
 
-    unsigned long long get_unsorted_tree_true_size() {return unsorted_tree->getNumKeys();}};
+    unsigned long long get_unsorted_tree_true_size() {return unsorted_tree->getNumKeys();}
+    
+private:
+
+    _key _get_insertion_range_lower_bound(bool& no_lower_bound) {
+        if(!_dual_tree_knobs::ALLOW_SORTED_TREE_INSERTION){
+            no_lower_bound = false;
+            return sorted_tree->getMaximumKey();
+        }
+        if(!sorted_tree->is_only_one_leaf()){
+            no_lower_bound = false;
+            return sorted_tree->get_second_tail_leaf_maximum_ley();
+        } else {
+            // Since there is only 1 leaf in the sorted tree, no lower bound for insertion range.
+            no_lower_bound = true;
+            // return any value is possible;
+            return sorted_tree->getMaximumKey();
+        }
+    }
+    
+    };
+
+
+    
 
 #endif
