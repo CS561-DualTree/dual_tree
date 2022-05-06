@@ -8,6 +8,15 @@ void dual_tree_test(const std::vector<int>& data_set)
     auto start = std::chrono::high_resolution_clock::now();
     dual_tree<int, int> dt;
     int idx = 0;
+    int cnt = 0;
+    for(int i: data_set){
+        if(idx == i) {
+            cnt += 1;
+        }
+        idx += 1;
+    }
+    std::cout << "Number of keys in sorted position: " << cnt << std::endl;
+    idx = 0;
     for(int i: data_set)
     {
         dt.insert(i, idx++); 

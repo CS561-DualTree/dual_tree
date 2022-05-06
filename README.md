@@ -42,3 +42,14 @@ To run the analysis, first use command "make" or "make analysis". The "analysis.
 `./analysis.o <data_file_path>`
 
 Currently, it only displays the insertion time cost of the dual_tree comparing with a single b-plus tree.
+
+## Run test query
+To run the test query command, first you need to input:
+
+`make test_query`
+
+After the file "test_query.o" is created, input the following command:
+
+`./test_query.o <data_file_path>`
+
+Then it will show you the query test result with respect to the data file.

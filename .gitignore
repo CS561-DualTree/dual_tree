@@ -1,4 +1,5 @@
 .vscode
-test_set/
+test_set*
+tree_dat/
 dataledger.txt
 *.o
