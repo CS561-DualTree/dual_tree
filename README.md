@@ -17,24 +17,23 @@ For example, to generate a workload of 1 Million integers with 0% noise and 5% w
 Currently, the script workload.sh can be used to generate specified test dataset. It now supports creating test set of 100K, 1M, 10M and 50M in size by passing the parameter to the script. For each data size, it will generate two types of test sets: "k" test and "l" test. In "k" test, "l" is set to 50, while "k" is varied from 10 to 50 in increment of 10. In "l" test, "k" is set to 35, while "l" is varied from 10 to 50 in increment of 10. Run the script in the root directory of the program.
 For example, after running the command
 `./workload.sh 100K`
-A new directory will be created, and the structure of it should be like:
-test_set/100K_test
-├── k_test
-│   ├── k10
-│   │   ├── test case 1
-│   │   ├── test case 2
-│   │   ├── test case 3
-│   │   ├── test case 4
-│   │   └── test case 5
-│   ├── k20
-│   │   └── ...(same as above)
-│   ├── k30
-│   │   └── ...
-│   ├── k40
-│   │   └── ...
-│   └── k50
+A new directory will be created, and the structure of it should be like:\
+test_set/100K_test\
+├── k_test\
+│   ├── k10\
+│   │   ├── test case 1\
+│   │   ├── test case 2\
+│   │   ├── test case 3\
+│   │   ├── test case 4\
+│   │   └── test case 5\
+│   ├── k20\
+│   │   └── ...(same as above)\
+│   ├── k30\
+│   │   └── ...\
+│   ├── k40\
+│   │   └── ...\
+│   └── k50\
 │       └── ...
-
 
 ## Run analysis
 To run the analysis, first use command "make" or "make analysis". The "analysis.o" receives one input data file created by workload_generator.
