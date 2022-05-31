@@ -319,7 +319,14 @@ public:
 
     void start() 
     {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(3, &cpuset);
         th = new std::thread(&query_thread::work_loop, this);
+        int rc = pthread_setaffinity_np(th->native_handle(), sizeof(cpu_set_t), &cpuset);
+        if(rc != 0) {
+            std::cerr << "Failed to bind thread with a core: " << rc << "\n";
+        }
     }
 };
 
